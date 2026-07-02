@@ -311,21 +311,28 @@ async function init() {
   player.killY = mapBounds.min.y - 5;
   respawn();
 
-  // оружие в руки: AK-47 основное; если модели ещё нет — временно облик M4
+  // оружие в руки: AK-47 основное; если модели нет — временно облик M4
   const M4_OPTS = { muzzle: [0.14, -0.11, -0.95] };
   await viewmodel.loadWeapon('m4a1', './assets/m4a1.glb', M4_OPTS);
   try {
-    await viewmodel.loadWeapon('ak47', './assets/ak47.glb', { muzzle: [0.14, -0.11, -0.95] });
+    // параметры из исходников fps-threejs-game (автор модели) + разворот к −Z
+    await viewmodel.loadWeapon('ak47', './assets/ak47.glb', {
+      position: [0.04, -0.02, 0], rotation: [0, Math.PI, 0], scale: 0.05, muzzle: [0.055, -0.045, -0.42],
+    });
   } catch {
     await viewmodel.loadWeapon('ak47', './assets/m4a1.glb', M4_OPTS); // заглушка-облик
   }
   try {
-    await viewmodel.loadWeapon('usp', './assets/usp.glb', { muzzle: [0.17, -0.16, -0.5] });
+    await viewmodel.loadWeapon('usp', './assets/usp.glb', {
+      position: [0.17, -0.07, -0.3], rotation: [0, -Math.PI / 2, 0], scale: 0.26, muzzle: [0.17, -0.09, -0.55],
+    });
   } catch {
     viewmodel.addProcedural('usp', buildProceduralPistol(), { muzzle: [0.17, -0.16, -0.5] });
   }
   try {
-    await viewmodel.loadWeapon('knife', './assets/knife.glb', { melee: true });
+    await viewmodel.loadWeapon('knife', './assets/knife.glb', {
+      melee: true, position: [0.2, -0.02, -0.35], rotation: [0.35, 2.4, 0.1], scale: 0.45,
+    });
   } catch {
     viewmodel.addProcedural('knife', buildProceduralKnife(), { melee: true });
   }
@@ -488,6 +495,19 @@ const gameApi = {
   respawn,
   gun: () => ({ slot: activeSlot, name: activeGun().def.name, ammo: activeGun().ammo, reserve: activeGun().reserve, reloading: activeGun().reloading }),
   switchTo,
+  vmAdjust: (id, { position, rotation, scale } = {}) => {
+    const w = viewmodel.weapons[id];
+    if (!w || !w.group.children[0]) return false;
+    const model = w.group.children[0];
+    if (position) model.position.fromArray(position);
+    if (rotation) model.rotation.set(rotation[0], rotation[1], rotation[2]);
+    if (scale) model.scale.setScalar(scale);
+    return true;
+  },
+  vmInfo: () => Object.fromEntries(Object.entries(viewmodel.weapons).map(([id, w]) => {
+    const b = new THREE.Box3().setFromObject(w.group);
+    return [id, { min: b.min.toArray().map(v => +v.toFixed(2)), max: b.max.toArray().map(v => +v.toFixed(2)) }];
+  })),
   fx: () => effects ? {
     decals: effects.decals.filter(m => m.visible).length,
     tracers: effects.tracers.filter(t => t.life > 0).length,

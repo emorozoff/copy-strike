@@ -56,6 +56,9 @@ export class ViewModel {
   async loadWeapon(id, url, opts = {}) {
     const gltf = await new Promise((res, rej) => new GLTFLoader().load(url, res, undefined, rej));
     const model = gltf.scene;
+    // скиннед-меши анимируются за пределы исходного bbox — без этого
+    // Three.js отсекает их фрустум-каллингом и оружие «исчезает»
+    model.traverse(o => { if (o.isMesh || o.isSkinnedMesh) o.frustumCulled = false; });
     if (opts.scale) model.scale.setScalar(opts.scale);
     model.position.fromArray(opts.position ?? [0.14, -0.24, -0.08]);
     model.rotation.set(...(opts.rotation ?? [0, Math.PI, 0]));
@@ -70,14 +73,15 @@ export class ViewModel {
     const clips = {
       idle: find(/firstperson_idle|(^|_)idle/i),
       reload: find(/firstperson_reload|reload/i),
-      draw: find(/firstperson_draw|draw|deploy|equip/i),
+      draw: find(/firstperson_draw|draw|deploy|equip|switch/i),
       shoot: find(/shoot_unsilenced_additive|shoot.*additive/i) ?? find(/shoot|fire|attack|slash/i),
     };
     if (clips.idle) {
       actions.idle = mixer.clipAction(clips.idle);
     }
     if (clips.shoot) {
-      if (/additive/i.test(clips.shoot.name)) {
+      actions.shootAdditive = /additive/i.test(clips.shoot.name);
+      if (actions.shootAdditive) {
         const additive = THREE.AnimationUtils.makeClipAdditive(clips.shoot.clone());
         actions.shoot = mixer.clipAction(additive);
         actions.shoot.blendMode = THREE.AdditiveAnimationBlendMode;
@@ -96,8 +100,11 @@ export class ViewModel {
     }
     // возврат idle после one-shot клипов (fadeOut навсегда выключает action)
     mixer.addEventListener('finished', e => {
-      if (actions.idle && (e.action === actions.reload || e.action === actions.draw)) {
+      if (!actions.idle) return;
+      if (e.action === actions.reload || e.action === actions.draw) {
         actions.idle.reset().fadeIn(0.15).play();
+      } else if (e.action === actions.shoot && !actions.shootAdditive) {
+        actions.idle.setEffectiveWeight(1);
       }
     });
 
@@ -140,8 +147,12 @@ export class ViewModel {
       this.muzzleFlash.visible = true;
       this.muzzleFlash.material.rotation = Math.random() * Math.PI * 2;
     }
-    const a = this.active?.actions.shoot;
-    if (a) a.reset().play();
+    const acts = this.active?.actions;
+    if (acts?.shoot) {
+      // не-аддитивный клип выстрела перекрывает idle: приглушаем idle на время
+      if (!acts.shootAdditive && acts.idle) acts.idle.setEffectiveWeight(0.05);
+      acts.shoot.reset().play();
+    }
   }
 
   playReload() {
