@@ -83,7 +83,10 @@ export async function loadMap(url, onProgress, onBeforeCollider, extraColliders 
 
   const merged = mergeGeometries(geoms, false);
   merged.boundsTree = new MeshBVH(merged);
-  const collider = new THREE.Mesh(merged, new THREE.MeshBasicMaterial({ wireframe: true }));
+  // DoubleSide обязателен: у декомпилированной карты обмотка треугольников
+  // ненадёжна, а raycast (пули) уважает material.side — иначе «изнаночные»
+  // стены останавливают игрока, но простреливаются насквозь
+  const collider = new THREE.Mesh(merged, new THREE.MeshBasicMaterial({ wireframe: true, side: THREE.DoubleSide }));
   collider.visible = false;
 
   const bounds = new THREE.Box3().setFromObject(scene);

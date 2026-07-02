@@ -2,7 +2,7 @@
 // (Ctrl+W закрывает вкладку — браузер не даёт это перехватить, поэтому основная клавиша C).
 const GAME_KEYS = new Set([
   'KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space', 'KeyC', 'ShiftLeft', 'ShiftRight',
-  'ControlLeft', 'ControlRight', 'Backquote', 'KeyE',
+  'ControlLeft', 'ControlRight', 'Backquote', 'KeyE', 'KeyR',
   'Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6',
 ]);
 
@@ -32,6 +32,12 @@ export class Input {
       const lim = Math.PI / 2 - 0.017;
       this.pitch = Math.max(-lim, Math.min(lim, this.pitch));
     });
+
+    // кнопки мыши учитываем только под pointer lock — клики по меню не стреляют
+    document.addEventListener('mousedown', e => {
+      if (this.pointerLocked) this.keys.add('Mouse' + e.button);
+    });
+    document.addEventListener('mouseup', e => this.keys.delete('Mouse' + e.button));
   }
 
   has(code) { return this.keys.has(code); }
@@ -47,6 +53,8 @@ export class Input {
       jump: this.has('Space'),
       crouch: this.has('KeyC') || this.has('ControlLeft') || this.has('ControlRight'),
       walk: this.has('ShiftLeft') || this.has('ShiftRight'),
+      fire: this.has('Mouse0'),
+      reload: this.has('KeyR'),
     };
   }
 }

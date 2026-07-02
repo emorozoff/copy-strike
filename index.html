@@ -20,6 +20,15 @@
   #hud{position:fixed;top:10px;left:12px;font-size:12px;line-height:1.5;white-space:pre;z-index:5;text-shadow:0 1px 2px #000}
   #cross{position:fixed;left:50%;top:50%;width:4px;height:4px;margin:-2px 0 0 -2px;background:#7fda6a;border-radius:50%;z-index:5;box-shadow:0 0 2px #000}
   #hint{position:fixed;bottom:10px;left:12px;font-size:11px;color:#8f8a7a;z-index:5;text-shadow:0 1px 2px #000}
+  #ammo{position:fixed;bottom:14px;right:18px;font-size:26px;color:#e8e2d0;z-index:5;text-shadow:0 2px 3px #000;letter-spacing:.05em}
+  #ammo span{font-size:15px;color:#9a9483}
+  #ammo.reloading{color:#d8a13a}
+  #hitmark{position:fixed;left:50%;top:50%;width:22px;height:22px;margin:-11px 0 0 -11px;z-index:6;opacity:0;pointer-events:none;transition:opacity .12s}
+  #hitmark::before,#hitmark::after{content:'';position:absolute;left:50%;top:50%;width:2px;height:22px;background:#fff;box-shadow:0 0 2px #000}
+  #hitmark::before{transform:translate(-50%,-50%) rotate(45deg)}
+  #hitmark::after{transform:translate(-50%,-50%) rotate(-45deg)}
+  #hitmark.head::before,#hitmark.head::after{background:#ff5b45}
+  #hitmark.show{opacity:.9}
   #editorPanel{position:fixed;top:10px;right:12px;font-size:11px;color:#d8a13a;text-align:right;white-space:pre;z-index:5;text-shadow:0 1px 2px #000}
 </style>
 </head>
@@ -27,7 +36,9 @@
 <canvas id="c"></canvas>
 <div id="hud"></div>
 <div id="cross"></div>
-<div id="hint">v0.1 · фаза 0 · <a href="net-test.html" style="color:#8f8a7a">сетевой тест</a></div>
+<div id="hitmark"></div>
+<div id="ammo" class="hidden"></div>
+<div id="hint">v0.2 · фаза 1 · <a href="net-test.html" style="color:#8f8a7a">сетевой тест</a></div>
 <div id="editorPanel" class="hidden"></div>
 
 <div id="loading" class="overlay">
@@ -39,7 +50,7 @@
 <div id="clickToPlay" class="overlay hidden">
   <h1>COPY<span>—</span>STRIKE</h1>
   <div id="play">ИГРАТЬ</div>
-  <div class="keys">WASD — бег · Space — прыжок · C — присед · Shift — ходьба<br>` (тильда) — редактор точек · Esc — выход из мыши</div>
+  <div class="keys">WASD — бег · Space — прыжок · C — присед · Shift — ходьба<br>ЛКМ — огонь · R — перезарядка · ` — редактор точек · Esc — выход из мыши</div>
 </div>
 
 <script type="importmap">
