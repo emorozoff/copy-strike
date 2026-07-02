@@ -7,7 +7,7 @@ import { PlayerController, MOVE } from './world/movement.js';
 import { Input, setupPointerLock } from './player/input.js';
 import { PointEditor } from './dev/editor.js';
 import { WEAPONS, Gun, currentSpread, shotDirection, computeDamage } from './combat/weapons.js';
-import { ViewModel } from './combat/viewmodel.js';
+import { ViewModel, buildProceduralKnife, buildProceduralPistol } from './combat/viewmodel.js';
 import { Effects } from './combat/effects.js';
 import { Dummy } from './combat/dummy.js';
 
@@ -58,18 +58,16 @@ window.addEventListener('resize', () => {
 });
 
 const audio = new AudioManager();
-audio.loadAll({
-  m4_shot: './assets/sounds/m4_shot.wav',
-  m4_boltpull: './assets/sounds/m4_boltpull.wav',
-  m4_clipin: './assets/sounds/m4_clipin.wav',
-  m4_clipout: './assets/sounds/m4_clipout.wav',
-  m4_deploy: './assets/sounds/m4_deploy.wav',
-  dryfire: './assets/sounds/dryfire.wav',
-  headshot1: './assets/sounds/headshot1.wav',
-  headshot2: './assets/sounds/headshot2.wav',
-  death1: './assets/sounds/death1.wav',
-  death2: './assets/sounds/death2.wav',
-});
+const SOUND_FILES = {};
+for (const n of [
+  'm4_shot', 'm4_boltpull', 'm4_clipin', 'm4_clipout', 'm4_deploy',
+  'ak_shot', 'ak_boltpull', 'ak_clipin', 'ak_clipout',
+  'usp_shot', 'usp_clipin', 'usp_clipout', 'usp_slide',
+  'knife_deploy', 'knife_slash1', 'knife_slash2', 'knife_hit1', 'knife_hit2', 'knife_hitwall', 'knife_stab',
+  'dryfire', 'dryfire_pistol', 'headshot1', 'headshot2', 'death1', 'death2',
+  'step1', 'step2', 'step3', 'step4',
+]) SOUND_FILES[n] = `./assets/sounds/${n}.wav`;
+audio.loadAll(SOUND_FILES);
 
 const input = new Input();
 const editor = new PointEditor(scene, editorPanelEl);
@@ -78,13 +76,20 @@ let deployPlayed = false;
 const lock = setupPointerLock(canvas, input, {
   onLock: () => {
     clickToPlayEl.classList.add('hidden');
-    if (!deployPlayed) { deployPlayed = true; audio.play('m4_deploy', { volume: 0.5 }); }
+    if (!deployPlayed) {
+      deployPlayed = true;
+      const d = guns[activeSlot].def.sounds.deploy;
+      if (d) audio.play(d, { volume: 0.5 });
+    }
   },
   onUnlock: () => { if (!DEBUG) clickToPlayEl.classList.remove('hidden'); },
 });
 playBtn.addEventListener('click', () => { audio.init(); lock.request(); });
 
-window.addEventListener('wheel', e => { if (editor.active) editor.changeSpeed(e.deltaY); });
+window.addEventListener('wheel', e => {
+  if (editor.active) editor.changeSpeed(e.deltaY);
+  else if (input.pointerLocked && player) cycleSlot(e.deltaY > 0 ? 1 : -1);
+});
 
 let player = null;
 let mapBounds = null;
@@ -93,8 +98,17 @@ const downRay = new THREE.Ray(new THREE.Vector3(), new THREE.Vector3(0, -1, 0));
 
 // --- бой ---
 const viewmodel = new ViewModel();
-const gun = new Gun(WEAPONS.m4a1);
-const punch = { pitch: 0, yaw: 0 };   // view-punch от отдачи, затухает
+// арсенал: 1 — AK-47 (основное), 2 — USP, 3 — нож, 4 — M4A1 (временно, до магазина)
+const guns = {
+  1: new Gun(WEAPONS.ak47),
+  2: new Gun(WEAPONS.usp),
+  3: new Gun(WEAPONS.knife),
+  4: new Gun(WEAPONS.m4a1),
+};
+const SLOT_ORDER = [1, 2, 3, 4];
+let activeSlot = 1;
+let deployT = 0;                      // достаём оружие — стрелять нельзя
+const punch = { pitch: 0, yaw: 0 };   // view-punch от отдачи
 let effects = null;
 const dummies = [];
 const shotRay = new THREE.Raycaster();
@@ -107,15 +121,37 @@ const numberPos = new THREE.Vector3();
 let mapCollider = null;
 let hitmarkTimer = null;
 
+function activeGun() { return guns[activeSlot]; }
+
 function updateAmmoHud() {
+  const gun = activeGun();
   ammoEl.classList.remove('hidden');
-  if (gun.reloading) {
+  if (gun.def.melee) {
+    ammoEl.classList.remove('reloading');
+    ammoEl.innerHTML = `<span>${gun.def.name}</span>`;
+  } else if (gun.reloading) {
     ammoEl.classList.add('reloading');
     ammoEl.textContent = 'перезарядка…';
   } else {
     ammoEl.classList.remove('reloading');
-    ammoEl.innerHTML = `${gun.ammo} <span>/ ${gun.reserve}</span>`;
+    ammoEl.innerHTML = `<span>${gun.def.name}</span> ${gun.ammo} <span>/ ${gun.reserve}</span>`;
   }
+}
+
+function switchTo(slot) {
+  if (!guns[slot] || slot === activeSlot) return;
+  activeGun().cancelReload(); // смена оружия отменяет перезарядку (как в CS)
+  activeSlot = slot;
+  const def = guns[slot].def;
+  deployT = def.deployTime;
+  viewmodel.setActive(def.id);
+  if (def.sounds.deploy) audio.play(def.sounds.deploy, { volume: 0.4, delay: 0.05 });
+  updateAmmoHud();
+}
+
+function cycleSlot(dir) {
+  const i = SLOT_ORDER.indexOf(activeSlot);
+  switchTo(SLOT_ORDER[(i + dir + SLOT_ORDER.length) % SLOT_ORDER.length]);
 }
 
 function flashHitmark(isHead) {
@@ -125,58 +161,94 @@ function flashHitmark(isHead) {
 }
 
 const PITCH_LIM = Math.PI / 2 - 0.017;
+const D2R = Math.PI / 180;
+const MAX_PUNCH_PITCH = 15 * D2R;
 
-function fireShot(patternIdx, snap) {
-  const def = gun.def;
-  const hspeed = Math.hypot(player.velocity.x, player.velocity.z);
-  const spread = currentSpread(def, { hspeed, onGround: player.onGround, crouching: player.crouching }, patternIdx);
+// Общая часть прицеливания: направление взгляда с учётом punch
+function aimShot(spreadRad) {
   const viewPitch = THREE.MathUtils.clamp(input.pitch + punch.pitch, -PITCH_LIM, PITCH_LIM);
-  shotDirection(input.yaw + punch.yaw, viewPitch, def, patternIdx, spread, shotDir);
+  shotDirection(input.yaw + punch.yaw, viewPitch, spreadRad, shotDir);
   shotOrigin.set(player.position.x, player.position.y + player.eyeHeight, player.position.z);
   shotRay.set(shotOrigin, shotDir);
+}
 
+function hitscanTargets() {
   const wallHit = shotRay.intersectObject(mapCollider, false)[0] ?? null;
   const dummyMeshes = dummies.filter(d => !d.dead).flatMap(d => d.meshes);
   const bodyHit = shotRay.intersectObjects(dummyMeshes, false)[0] ?? null;
+  if (bodyHit && (!wallHit || bodyHit.distance < wallHit.distance)) return { bodyHit, wallHit: null };
+  return { bodyHit: null, wallHit };
+}
 
+function applyBodyHit(def, bodyHit) {
+  const part = bodyHit.object.userData.part;
+  const dummy = bodyHit.object.userData.dummy;
+  const dmg = computeDamage(def, bodyHit.distance, part);
+  const died = dummy.hit(dmg);
+  numberPos.copy(bodyHit.point);
+  numberPos.y += 0.25;
+  effects.addDamageNumber(numberPos, dmg, part === 'head');
+  flashHitmark(part === 'head');
+  if (died) audio.playOneOf(['death1', 'death2'], { volume: 0.7 });
+  else if (part === 'head' && !def.melee) audio.playOneOf(['headshot1', 'headshot2'], { volume: 0.6 });
+  return died;
+}
+
+function meleeAttack(def) {
+  aimShot(0);
+  shotRay.far = def.meleeRange;
+  const { bodyHit, wallHit } = hitscanTargets();
+  shotRay.far = 400;
+  audio.playOneOf(def.sounds.fire, { volume: 0.5 }); // взмах
+  if (bodyHit) {
+    const died = applyBodyHit(def, bodyHit);
+    audio.play(died ? def.sounds.stab : def.sounds.hitFlesh[Math.floor(Math.random() * def.sounds.hitFlesh.length)], { volume: 0.6, delay: 0.04 });
+  } else if (wallHit) {
+    audio.play(def.sounds.hitWall, { volume: 0.5, delay: 0.04 });
+    effects.addDecal(wallHit.point, wallHit.face.normal);
+  }
+  viewmodel.playShoot({ flash: false });
+}
+
+function fireShot(ev) {
+  const gun = activeGun();
+  const def = gun.def;
+  if (def.melee) { meleeAttack(def); return; }
+
+  const hspeed = Math.hypot(player.velocity.x, player.velocity.z);
+  const spread = currentSpread(def, { hspeed, onGround: player.onGround, crouching: player.crouching }, ev.burstIdx);
+  aimShot(spread);
+
+  const { bodyHit, wallHit } = hitscanTargets();
   let endPoint = null;
-  if (bodyHit && (!wallHit || bodyHit.distance < wallHit.distance)) {
-    const part = bodyHit.object.userData.part;
-    const dummy = bodyHit.object.userData.dummy;
-    const dmg = computeDamage(def, bodyHit.distance, part);
-    const died = dummy.hit(dmg);
-    numberPos.copy(bodyHit.point);
-    numberPos.y += 0.25;
-    effects.addDamageNumber(numberPos, dmg, part === 'head');
-    flashHitmark(part === 'head');
-    if (died) audio.playOneOf(['death1', 'death2'], { volume: 0.7 });
-    else if (part === 'head') audio.playOneOf(['headshot1', 'headshot2'], { volume: 0.6 });
+  if (bodyHit) {
+    applyBodyHit(def, bodyHit);
     endPoint = bodyHit.point;
   } else if (wallHit) {
     effects.addDecal(wallHit.point, wallHit.face.normal);
     endPoint = wallHit.point;
   }
 
-  // трассер из-под ствола (чуть right-down от глаз)
-  tracerFrom.copy(shotOrigin)
-    .addScaledVector(shotDir, 1.0);
+  tracerFrom.copy(shotOrigin).addScaledVector(shotDir, 1.0);
   tracerFrom.y -= 0.12;
   effects.addTracer(tracerFrom, endPoint ?? tracerFrom.clone().addScaledVector(shotDir, 120));
 
-  // отдача: view-punch (частично) — сам паттерн уже вшит в направление пуль
-  const [pUp, pSide] = def.recoilPattern[patternIdx];
-  const d2r = Math.PI / 180;
-  punch.pitch = Math.min(punch.pitch + pUp * 0.35 * d2r, 6 * d2r);
-  punch.yaw += pSide * 0.35 * d2r;
+  // Отдача CS-стиля: полный «пинок» уходит в punch и НАКАПЛИВАЕТСЯ, пока
+  // очередь зажата (затухание во время стрельбы почти нулевое — см. tick).
+  // Ствол реально уезжает вверх, компенсация — мышью вниз.
+  const [kUp, kSide] = ev.kick;
+  punch.pitch = Math.min(punch.pitch + kUp * D2R, MAX_PUNCH_PITCH);
+  punch.yaw += kSide * D2R;
 
   audio.playOneOf(def.sounds.fire, { volume: 0.35, rate: 0.97 + Math.random() * 0.06 });
   viewmodel.playShoot();
   updateAmmoHud();
 }
 
-function handleGunEvent(ev, snap) {
-  if (ev.type === 'fire') fireShot(ev.patternIdx, snap);
-  else if (ev.type === 'dry') audio.play('dryfire', { volume: 0.5 });
+function handleGunEvent(ev) {
+  const def = activeGun().def;
+  if (ev.type === 'fire') fireShot(ev);
+  else if (ev.type === 'dry') audio.play(def.sounds.dry, { volume: 0.5 });
   else if (ev.type === 'reload') {
     viewmodel.playReload();
     updateAmmoHud();
@@ -239,8 +311,25 @@ async function init() {
   player.killY = mapBounds.min.y - 5;
   respawn();
 
-  // оружие в руки и мишени на карту
-  await viewmodel.load('./assets/m4a1.glb');
+  // оружие в руки: AK-47 основное; если модели ещё нет — временно облик M4
+  const M4_OPTS = { muzzle: [0.14, -0.11, -0.95] };
+  await viewmodel.loadWeapon('m4a1', './assets/m4a1.glb', M4_OPTS);
+  try {
+    await viewmodel.loadWeapon('ak47', './assets/ak47.glb', { muzzle: [0.14, -0.11, -0.95] });
+  } catch {
+    await viewmodel.loadWeapon('ak47', './assets/m4a1.glb', M4_OPTS); // заглушка-облик
+  }
+  try {
+    await viewmodel.loadWeapon('usp', './assets/usp.glb', { muzzle: [0.17, -0.16, -0.5] });
+  } catch {
+    viewmodel.addProcedural('usp', buildProceduralPistol(), { muzzle: [0.17, -0.16, -0.5] });
+  }
+  try {
+    await viewmodel.loadWeapon('knife', './assets/knife.glb', { melee: true });
+  } catch {
+    viewmodel.addProcedural('knife', buildProceduralKnife(), { melee: true });
+  }
+  viewmodel.setActive('ak47');
   effects = new Effects(scene);
   const dummySpots = [
     [-32, 38, 180],  // 10 м к северу от спавна T, лицом к игроку
@@ -274,16 +363,22 @@ input.onKeyDown = code => {
     }
     return;
   }
-  if (editor.active) editor.handleKey(code, input);
+  if (editor.active) { editor.handleKey(code, input); return; }
+  const m = /^Digit([1-4])$/.exec(code);
+  if (m) switchTo(+m[1]);
 };
 
 const IDLE_SNAP = { move: { x: 0, y: 0 }, yaw: 0, jump: false, crouch: false, walk: false, fire: false, reload: false };
+
+let stepAcc = 0;
+let wasAirborne = false;
 
 function tick(dt) {
   // без pointer lock (оверлей «ИГРАТЬ» на экране) ввод не игровой —
   // иначе зажатый W уводит персонажа вслепую
   const active = input.pointerLocked || DEBUG || editor.active;
   const snap = active ? input.snapshot() : { ...IDLE_SNAP, yaw: input.yaw };
+  const vyBefore = player.velocity.y;
   if (editor.active) {
     editor.update(dt, snap);
   } else if (!gameApi.frozen) {
@@ -292,13 +387,38 @@ function tick(dt) {
     if (player.fellOut) respawn();
   }
 
-  // оружие (в редакторе не стреляем)
-  const ev = gun.update(dt, snap.fire && !editor.active, snap.reload && !editor.active);
-  if (ev) handleGunEvent(ev, snap);
+  // шаги: по накопленной дистанции; ходьба (Shift) и присед — бесшумные, как в CS
+  if (!editor.active) {
+    const hs = Math.hypot(player.velocity.x, player.velocity.z);
+    if (player.onGround) {
+      if (wasAirborne && vyBefore < -3.5) {
+        audio.playOneOf(['step1', 'step2', 'step3', 'step4'], { volume: 0.32 }); // приземление
+        stepAcc = 0;
+      }
+      if (hs > 3.5 && !player.crouching) {
+        stepAcc += hs * dt;
+        if (stepAcc >= 1.9) {
+          stepAcc = 0;
+          audio.playOneOf(['step1', 'step2', 'step3', 'step4'], { volume: 0.22 });
+        }
+      } else stepAcc = 0;
+    }
+    wasAirborne = !player.onGround;
+  }
 
-  // затухание view-punch
-  punch.pitch = THREE.MathUtils.damp(punch.pitch, 0, 6, dt);
-  punch.yaw = THREE.MathUtils.damp(punch.yaw, 0, 6, dt);
+  // оружие (в редакторе не стреляем; во время доставания — тоже)
+  const gun = activeGun();
+  deployT -= dt;
+  if (deployT <= 0) {
+    const ev = gun.update(dt, snap.fire && !editor.active, snap.reload && !editor.active);
+    if (ev) handleGunEvent(ev);
+  }
+
+  // Затухание view-punch: пока стреляем — почти не возвращается (ствол
+  // держится наверху), после отпускания — быстрый возврат.
+  const lambda = gun.firingRecently ? 0.6 : 11;
+  punch.pitch = THREE.MathUtils.damp(punch.pitch, 0, lambda, dt);
+  punch.yaw = THREE.MathUtils.damp(punch.yaw, 0, lambda, dt);
 
   for (const d of dummies) d.update(dt);
   if (effects) effects.update(dt);
@@ -366,7 +486,8 @@ const gameApi = {
   bounds: () => mapBounds ? [mapBounds.min.toArray(), mapBounds.max.toArray()] : null,
   findFloor: (x, z) => findFloor(player.collider, x, z, mapBounds.max.y + 5),
   respawn,
-  gun: () => ({ ammo: gun.ammo, reserve: gun.reserve, reloading: gun.reloading }),
+  gun: () => ({ slot: activeSlot, name: activeGun().def.name, ammo: activeGun().ammo, reserve: activeGun().reserve, reloading: activeGun().reloading }),
+  switchTo,
   fx: () => effects ? {
     decals: effects.decals.filter(m => m.visible).length,
     tracers: effects.tracers.filter(t => t.life > 0).length,
