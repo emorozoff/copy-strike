@@ -41,6 +41,10 @@ scene.add(sun);
 window.addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
+  // devicePixelRatio меняется на лету (зум браузера, перенос окна между
+  // retina и обычным монитором) — без обновления картинка мылится или GPU
+  // рендерит вчетверо больше пикселей, чем нужно
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
   renderer.setSize(innerWidth, innerHeight);
 });
 
@@ -88,16 +92,21 @@ function respawn() {
 }
 
 async function init() {
-  const [map, mapData] = await Promise.all([
-    loadMap('./assets/de_dust2.glb', p => {
+  const mapData = await loadMapData('./assets/map-data.json'); // 0.5 КБ, мгновенно
+  const map = await loadMap(
+    './assets/de_dust2.glb',
+    p => {
       if (p === null) { loadNoteEl.textContent = 'загрузка de_dust2… (размер неизвестен)'; return; }
       barFillEl.style.width = Math.round(p * 100) + '%';
-    }),
-    loadMapData('./assets/map-data.json'),
-  ]);
-
-  loadNoteEl.textContent = 'построение коллизий…';
-  await new Promise(r => setTimeout(r)); // дать кадру отрисоваться
+    },
+    async () => {
+      // сообщение должно УСПЕТЬ отрисоваться до синхронного построения BVH
+      loadNoteEl.textContent = 'построение коллизий…';
+      barFillEl.style.width = '100%';
+      await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+    },
+    mapData?.colliders ?? []
+  );
 
   scene.add(map.scene);
   scene.add(map.collider);
@@ -117,6 +126,7 @@ async function init() {
 
 input.onKeyDown = code => {
   if (!player) return;
+  if (!input.pointerLocked && !DEBUG && !editor.active) return; // под оверлеем клавиши не игровые
   if (code === 'Backquote') {
     if (editor.active) {
       editor.exit();
@@ -131,8 +141,13 @@ input.onKeyDown = code => {
   if (editor.active) editor.handleKey(code, input);
 };
 
+const IDLE_SNAP = { move: { x: 0, y: 0 }, yaw: 0, jump: false, crouch: false, walk: false };
+
 function tick(dt) {
-  const snap = input.snapshot();
+  // без pointer lock (оверлей «ИГРАТЬ» на экране) ввод не игровой —
+  // иначе зажатый W уводит персонажа вслепую
+  const active = input.pointerLocked || DEBUG || editor.active;
+  const snap = active ? input.snapshot() : { ...IDLE_SNAP, yaw: input.yaw };
   if (editor.active) {
     editor.update(dt, snap);
   } else if (!gameApi.frozen) {
@@ -143,11 +158,14 @@ function tick(dt) {
 }
 
 let hudTimer = 0;
-function render(delta, fps) {
+const camPos = new THREE.Vector3();
+function render(delta, fps, alpha) {
   if (editor.active) {
     camera.position.copy(editor.position);
   } else {
-    camera.position.set(player.position.x, player.position.y + player.eyeHeight, player.position.z);
+    // интерполяция между тиками: позиция прошлого тика → текущего
+    camPos.copy(player.prevPosition).lerp(player.position, Math.min(alpha, 1));
+    camera.position.set(camPos.x, camPos.y + player.eyeHeight, camPos.z);
   }
   camera.rotation.set(input.pitch, input.yaw, 0);
 

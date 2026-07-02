@@ -11,7 +11,7 @@ export const UNIT = 0.0254;
 // константой, а по фактическому bbox к известному размеру: 5312 юнитов ≈ 134.9 м.
 const DUST2_LONGEST_METERS = 5312 * UNIT;
 
-export async function loadMap(url, onProgress) {
+export async function loadMap(url, onProgress, onBeforeCollider, extraColliders = []) {
   const gltf = await new Promise((resolve, reject) => {
     new GLTFLoader().load(
       url,
@@ -49,6 +49,10 @@ export async function loadMap(url, onProgress) {
     }
   });
 
+  // Пауза перед тяжёлой синхронной работой (merge + BVH) — чтобы UI успел
+  // отрисовать «построение коллизий…» до фриза главного потока.
+  if (onBeforeCollider) await onBeforeCollider();
+
   // Единый статичный коллайдер: вся геометрия в мировых координатах (метрах),
   // только позиции — одна BVH обслуживает движение, hitscan и всё остальное.
   const geoms = [];
@@ -62,6 +66,21 @@ export async function loadMap(url, onProgress) {
     if (g.index) g = g.toNonIndexed();
     geoms.push(g);
   });
+
+  // Невидимые коллайдеры из map-data.json: у GLB нет playerclip-браней
+  // оригинала, дыры в пустоту запечатываем AABB-боксами (только коллизии,
+  // в рендер не попадают — collider-меш невидим).
+  for (const c of extraColliders) {
+    const sx = c.max[0] - c.min[0], sy = c.max[1] - c.min[1], sz = c.max[2] - c.min[2];
+    let g = new THREE.BoxGeometry(sx, sy, sz);
+    g.translate(c.min[0] + sx / 2, c.min[1] + sy / 2, c.min[2] + sz / 2);
+    for (const name of Object.keys(g.attributes)) {
+      if (name !== 'position') g.deleteAttribute(name);
+    }
+    g = g.toNonIndexed();
+    geoms.push(g);
+  }
+
   const merged = mergeGeometries(geoms, false);
   merged.boundsTree = new MeshBVH(merged);
   const collider = new THREE.Mesh(merged, new THREE.MeshBasicMaterial({ wireframe: true }));
@@ -73,7 +92,9 @@ export async function loadMap(url, onProgress) {
 
 export async function loadMapData(url) {
   try {
-    const res = await fetch(url);
+    // no-cache: GitHub Pages отдаёт max-age=600 — после редеплоя разметки
+    // свежие спавны иначе приедут только через 10 минут
+    const res = await fetch(url, { cache: 'no-cache' });
     if (!res.ok) return null;
     return await res.json();
   } catch {

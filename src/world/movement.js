@@ -17,6 +17,8 @@ export const MOVE = {
   crouchEye: 1.17,
   eyeLerp: 12,           // 1/с, плавность смены высоты глаз
   physicsSubsteps: 5,
+  groundNormalY: 0.69,   // cos(~46°) — предел проходимого уклона (CS ≈ 45.6°)
+  snapDistance: 0.15,    // прилипание к полу на спусках/ступенях, м за подшаг
 };
 
 const tmpMat = new THREE.Matrix4();
@@ -25,13 +27,15 @@ const tmpBox = new THREE.Box3();
 const triPoint = new THREE.Vector3();
 const capPoint = new THREE.Vector3();
 const tmpDelta = new THREE.Vector3();
-const upRay = new THREE.Ray();
-const UP = new THREE.Vector3(0, 1, 0);
+const scratch = new THREE.Vector3();
+const tmpRay = new THREE.Ray();
+const DOWN = new THREE.Vector3(0, -1, 0);
 
 export class PlayerController {
   constructor(collider) {
     this.collider = collider;       // THREE.Mesh с geometry.boundsTree (MeshBVH)
     this.position = new THREE.Vector3(); // ноги
+    this.prevPosition = new THREE.Vector3(); // позиция прошлого тика — для интерполяции рендера
     this.velocity = new THREE.Vector3();
     this.onGround = false;
     this.crouching = false;
@@ -43,6 +47,7 @@ export class PlayerController {
 
   teleport(x, y, z) {
     this.position.set(x, y, z);
+    this.prevPosition.set(x, y, z);
     this.velocity.set(0, 0, 0);
     this.fellOut = false;
   }
@@ -51,23 +56,45 @@ export class PlayerController {
     if (want && !this.crouching) {
       this.crouching = true;
       this.height = MOVE.crouchHeight;
-    } else if (!want && this.crouching && this.headroomClear()) {
+    } else if (!want && this.crouching && this.canStand()) {
       this.crouching = false;
       this.height = MOVE.standHeight;
     }
   }
 
-  headroomClear() {
-    // Хватает ли места встать: луч вверх от макушки текущей капсулы.
-    upRay.origin.copy(this.position);
-    upRay.origin.y += this.height;
-    upRay.direction.copy(UP);
-    const hit = this.collider.geometry.boundsTree.raycastFirst(upRay, THREE.DoubleSide);
-    const need = MOVE.standHeight - this.height + 0.02;
-    return !hit || hit.distance > need;
+  canStand() {
+    // Хватает ли места встать: тест ОБЪЁМА стоячей капсулы (тонкий луч по оси
+    // пропускает козырьки/балки, смещённые от оси до radius, — и игрок встаёт
+    // внутрь геометрии).
+    const M = MOVE;
+    tmpSeg.start.copy(this.position); tmpSeg.start.y += M.radius + 0.02;
+    tmpSeg.end.copy(this.position);   tmpSeg.end.y += M.standHeight - M.radius;
+    tmpMat.copy(this.collider.matrixWorld).invert();
+    tmpSeg.start.applyMatrix4(tmpMat);
+    tmpSeg.end.applyMatrix4(tmpMat);
+    tmpBox.makeEmpty();
+    tmpBox.expandByPoint(tmpSeg.start);
+    tmpBox.expandByPoint(tmpSeg.end);
+    tmpBox.min.addScalar(-M.radius);
+    tmpBox.max.addScalar(M.radius);
+    let blocked = false;
+    this.collider.geometry.boundsTree.shapecast({
+      intersectsBounds: box => box.intersectsBox(tmpBox),
+      intersectsTriangle: tri => {
+        // порог чуть меньше радиуса: лёгкое касание пола (прижим гравитации)
+        // не должно блокировать вставание
+        if (tri.closestPointToSegment(tmpSeg, triPoint, capPoint) < M.radius - 0.01) {
+          blocked = true;
+          return true; // прервать обход BVH
+        }
+        return false;
+      },
+    });
+    return !blocked;
   }
 
   update(dt, input) {
+    this.prevPosition.copy(this.position);
     const sub = dt / MOVE.physicsSubsteps;
     for (let i = 0; i < MOVE.physicsSubsteps; i++) this.step(sub, input);
     const targetEye = this.crouching ? MOVE.crouchEye : MOVE.standEye;
@@ -91,12 +118,14 @@ export class PlayerController {
     const wl = Math.hypot(wx, wz);
     if (wl > 0) { wx = wx / wl * speed; wz = wz / wl * speed; }
 
+    let jumped = false;
     if (this.onGround) {
       this.velocity.x = wx;
       this.velocity.z = wz;
       if (input.jump) {
         this.velocity.y = M.jumpSpeed;
         this.onGround = false;
+        jumped = true;
       }
     } else if (wl > 0) {
       // В воздухе без ввода момент сохраняется; с вводом — ограниченный доворот.
@@ -109,8 +138,26 @@ export class PlayerController {
       }
     }
 
+    const wasGround = this.onGround;
     this.position.addScaledVector(this.velocity, dt);
     this.collide(dt);
+
+    // Прилипание к полу: прижим гравитации опускает капсулу лишь на доли мм за
+    // подшаг, а пол на спуске уходит на сантиметры — без снапа игрок «скачет»
+    // по рампам (и в эти моменты не может прыгать). Снапаем только на
+    // проходимый уклон и только если не прыгали.
+    if (wasGround && !this.onGround && !jumped && this.velocity.y <= 0) {
+      tmpRay.origin.copy(this.position);
+      tmpRay.origin.y += 0.05;
+      tmpRay.direction.copy(DOWN);
+      const hit = this.collider.geometry.boundsTree.raycastFirst(tmpRay, THREE.DoubleSide);
+      if (hit && hit.distance <= 0.05 + M.snapDistance &&
+          hit.face && Math.abs(hit.face.normal.y) > M.groundNormalY) {
+        this.position.y -= hit.distance - 0.05;
+        this.onGround = true;
+        this.velocity.y = 0;
+      }
+    }
   }
 
   collide(dt) {
@@ -129,6 +176,10 @@ export class PlayerController {
     tmpBox.min.addScalar(-M.radius);
     tmpBox.max.addScalar(M.radius);
 
+    // «Земля» — только контакт с проходимым уклоном (по направлению выталкивания
+    // ≈ нормали контакта). Иначе любой скошенный обломок регистрируется как пол:
+    // можно замирать на 60° скалах и «взбегать» по почти отвесным стенам.
+    let groundContactY = -1;
     this.collider.geometry.boundsTree.shapecast({
       intersectsBounds: box => box.intersectsBox(tmpBox),
       intersectsTriangle: tri => {
@@ -138,10 +189,15 @@ export class PlayerController {
         if (dist < M.radius) {
           const depth = M.radius - dist;
           const dir = capPoint.sub(triPoint).normalize();
+          if (depth > 1e-5 && dir.y > groundContactY) groundContactY = dir.y;
           tmpSeg.start.addScaledVector(dir, depth);
           tmpSeg.end.addScaledVector(dir, depth);
-          tmpBox.expandByPoint(tmpSeg.start);
-          tmpBox.expandByPoint(tmpSeg.end);
+          // расширяем query-бокс с запасом radius, иначе стены в соседних
+          // BVH-узлах, куда нас толкнуло, не будут проверены в этом подшаге
+          scratch.copy(tmpSeg.start).addScalar(-M.radius); tmpBox.expandByPoint(scratch);
+          scratch.copy(tmpSeg.start).addScalar(M.radius);  tmpBox.expandByPoint(scratch);
+          scratch.copy(tmpSeg.end).addScalar(-M.radius);   tmpBox.expandByPoint(scratch);
+          scratch.copy(tmpSeg.end).addScalar(M.radius);    tmpBox.expandByPoint(scratch);
         }
       },
     });
@@ -150,7 +206,8 @@ export class PlayerController {
     triPoint.y -= M.radius; // сегмент начинается на высоте radius от ног
     tmpDelta.subVectors(triPoint, this.position);
 
-    this.onGround = tmpDelta.y > Math.abs(dt * this.velocity.y * 0.25);
+    this.onGround = groundContactY > M.groundNormalY &&
+      tmpDelta.y > -Math.abs(dt * this.velocity.y);
 
     const offset = Math.max(0, tmpDelta.length() - 1e-5);
     if (offset > 0) tmpDelta.normalize().multiplyScalar(offset);

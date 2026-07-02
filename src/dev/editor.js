@@ -11,6 +11,11 @@ const LABELS = {
   Digit6: ['buyzone_ct', 0x2a5a8a],
 };
 
+const markerGeo = new THREE.SphereGeometry(0.15, 12, 8);
+const markerMats = Object.fromEntries(
+  Object.values(LABELS).map(([label, color]) => [label, new THREE.MeshBasicMaterial({ color })])
+);
+
 export class PointEditor {
   constructor(scene, panelEl) {
     this.scene = scene;
@@ -20,18 +25,21 @@ export class PointEditor {
     this.speed = 12; // м/с
     this.points = [];
     this.markers = new THREE.Group();
+    this.markers.visible = false; // маркеры видны только в редакторе
     scene.add(this.markers);
   }
 
   enter(fromPosition) {
     this.active = true;
     this.position.copy(fromPosition);
+    this.markers.visible = true;
     this.panel.classList.remove('hidden');
     this.refreshPanel();
   }
 
   exit() {
     this.active = false;
+    this.markers.visible = false;
     this.panel.classList.add('hidden');
   }
 
@@ -42,21 +50,25 @@ export class PointEditor {
       return true;
     }
     if (code === 'KeyE') { this.export(); return true; }
+    if (code === 'Backspace') { this.undo(); return true; }
     return false;
   }
 
   record(label, yaw) {
     const p = { label, pos: [+this.position.x.toFixed(2), +this.position.y.toFixed(2), +this.position.z.toFixed(2)], yaw: +((yaw * 180 / Math.PI) % 360).toFixed(1) };
     this.points.push(p);
-    const color = Object.values(LABELS).find(([l]) => l === label)[1];
-    const m = new THREE.Mesh(
-      new THREE.SphereGeometry(0.15, 12, 8),
-      new THREE.MeshBasicMaterial({ color })
-    );
+    const m = new THREE.Mesh(markerGeo, markerMats[label]); // общие geo/mat — без утечек
     m.position.copy(this.position);
     this.markers.add(m);
     this.refreshPanel();
     console.log('точка:', JSON.stringify(p));
+  }
+
+  undo() {
+    if (!this.points.length) return;
+    this.points.pop();
+    this.markers.remove(this.markers.children[this.markers.children.length - 1]);
+    this.refreshPanel();
   }
 
   refreshPanel() {
@@ -67,6 +79,7 @@ export class PointEditor {
       '1 спавн T · 2 спавн CT\n' +
       '3 плент A · 4 плент B\n' +
       '5 закуп T · 6 закуп CT\n' +
+      'Bksp — удалить последнюю\n' +
       'E — экспорт · ` — выход\n' +
       'колесо — скорость (' + this.speed.toFixed(0) + ' м/с)\n\n' +
       Object.entries(counts).map(([l, n]) => l + ': ' + n).join('\n');

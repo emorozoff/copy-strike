@@ -16,6 +16,7 @@ export class Input {
     this.onKeyDown = null; // (code) => void — одиночные нажатия (редактор)
 
     window.addEventListener('keydown', e => {
+      if (e.metaKey) return; // Cmd-комбинации (копирование и т.п.) — не игровой ввод
       if (e.repeat) { if (GAME_KEYS.has(e.code)) e.preventDefault(); return; }
       this.keys.add(e.code);
       if (GAME_KEYS.has(e.code)) e.preventDefault();
@@ -42,6 +43,7 @@ export class Input {
         y: (this.has('KeyW') ? 1 : 0) - (this.has('KeyS') ? 1 : 0),
       },
       yaw: this.yaw,
+      pitch: this.pitch,
       jump: this.has('Space'),
       crouch: this.has('KeyC') || this.has('ControlLeft') || this.has('ControlRight'),
       walk: this.has('ShiftLeft') || this.has('ShiftRight'),
@@ -57,7 +59,13 @@ export function setupPointerLock(canvas, input, { onLock, onUnlock }) {
       // unadjustedMovement: сырая мышь без ускорения ОС (не везде поддерживается)
       await canvas.requestPointerLock({ unadjustedMovement: true });
     } catch {
-      try { canvas.requestPointerLock(); } catch { /* повторный вызов в кулдаун — игнор */ }
+      // в новых браузерах requestPointerLock возвращает Promise — отказ
+      // (например, клик в ~1.3 с кулдаун после Esc) прилетает асинхронно,
+      // синхронный try/catch его не ловит
+      try {
+        const p = canvas.requestPointerLock();
+        if (p && typeof p.catch === 'function') p.catch(() => {});
+      } catch { /* старые браузеры кидают синхронно */ }
     }
   }
   document.addEventListener('pointerlockchange', () => {
