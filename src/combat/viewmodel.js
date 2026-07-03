@@ -159,11 +159,16 @@ export class ViewModel {
     }
   }
 
-  playReload() {
+  // duration — целевая длительность (def.reloadTime): клип растягивается или
+  // сжимается так, чтобы анимация закончилась ровно к пополнению магазина
+  playReload(duration) {
     const w = this.active;
     if (!w || !w.actions.reload) return;
     if (w.actions.idle) w.actions.idle.fadeOut(0.08);
-    w.actions.reload.reset().play();
+    const a = w.actions.reload;
+    a.reset();
+    a.timeScale = duration ? a.getClip().duration / duration : 1;
+    a.play();
   }
 
   update(dt, { hspeed, onGround, yaw, pitch }) {

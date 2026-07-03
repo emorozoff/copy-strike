@@ -71,6 +71,17 @@ export const WEAPONS = {
   },
 };
 
+// Перезарядка на 30% дольше оригинала CS (решение игрока 2026-07-03).
+// В defs выше — оригинальные тайминги CS; здесь длительность и звуки
+// множатся одним коэффициентом, а анимация растягивается под reloadTime
+// через timeScale в viewmodel.playReload — тайминг, звук и картинка
+// синхронны по построению.
+const RELOAD_MULT = 1.3;
+for (const def of Object.values(WEAPONS)) {
+  def.reloadTime *= RELOAD_MULT;
+  def.reloadSounds = def.reloadSounds.map(([t, name]) => [t * RELOAD_MULT, name]);
+}
+
 // Состояние одного оружия: патроны, темп, перезарядка, индекс очереди.
 export class Gun {
   constructor(def) {

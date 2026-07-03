@@ -122,6 +122,7 @@ shotRay.firstHitOnly = true;
 const shotDir = new THREE.Vector3();
 const shotOrigin = new THREE.Vector3();
 const tracerFrom = new THREE.Vector3();
+const tracerTo = new THREE.Vector3();
 const numberPos = new THREE.Vector3();
 let mapCollider = null;
 let hitmarkTimer = null;
@@ -234,9 +235,13 @@ function fireShot(ev) {
     endPoint = wallHit.point;
   }
 
-  tracerFrom.copy(shotOrigin).addScaledVector(shotDir, 1.0);
-  tracerFrom.y -= 0.12;
-  effects.addTracer(tracerFrom, endPoint ?? tracerFrom.clone().addScaledVector(shotDir, 120));
+  // Трассер вылетает из дула, а не из центра экрана: смещение дула задано
+  // в пространстве камеры оружия (FOV 54) — x/y растягиваем под FOV основной
+  // камеры, чтобы точка на экране совпала с видимым стволом, и переводим в мир
+  const muzzle = viewmodel.active?.opts.muzzle ?? [0.14, -0.11, -0.5];
+  const fovK = Math.tan(camera.fov * 0.5 * D2R) / Math.tan(viewmodel.camera.fov * 0.5 * D2R);
+  tracerFrom.set(muzzle[0] * fovK, muzzle[1] * fovK, muzzle[2]).applyMatrix4(camera.matrixWorld);
+  effects.addTracer(tracerFrom, endPoint ?? tracerTo.copy(shotOrigin).addScaledVector(shotDir, 120));
 
   // Отдача CS-стиля: полный «пинок» уходит в punch и НАКАПЛИВАЕТСЯ, пока
   // очередь зажата (затухание во время стрельбы почти нулевое — см. tick).
@@ -255,7 +260,7 @@ function handleGunEvent(ev) {
   if (ev.type === 'fire') fireShot(ev);
   else if (ev.type === 'dry') audio.play(def.sounds.dry, { volume: 0.5 });
   else if (ev.type === 'reload') {
-    viewmodel.playReload();
+    viewmodel.playReload(def.reloadTime);
     updateAmmoHud();
   } else if (ev.type === 'reloadSound') {
     for (const name of ev.sounds) audio.play(name, { volume: 0.5 });
@@ -302,8 +307,11 @@ async function init() {
     av('./assets/de_dust2.glb'),
     p => {
       if (p === null) { loadNoteEl.textContent = 'загрузка карты… (размер неизвестен)'; return; }
-      loadNoteEl.textContent = `загрузка карты… ${Math.round(p * 100)}%`;
-      barFillEl.style.width = Math.round(p * 100) + '%';
+      // GH Pages отдаёт gzip: «загружено» считается по распакованным байтам
+      // и превышает Content-Length — без клампа прогресс уезжает за 100%
+      const pct = Math.min(100, Math.round(p * 100));
+      loadNoteEl.textContent = `загрузка карты… ${pct}%`;
+      barFillEl.style.width = pct + '%';
     },
     async () => {
       // сообщение должно УСПЕТЬ отрисоваться до синхронного построения BVH
