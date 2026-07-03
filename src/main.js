@@ -18,13 +18,14 @@ THREE.Mesh.prototype.raycast = acceleratedRaycast;
 const params = new URLSearchParams(location.search);
 const DEBUG = params.has('debug');
 
-// Версия игры: БАМПИТЬ ПРИ КАЖДОМ ДЕПЛОЕ. Выводится сверху экрана из JS —
-// по номеру видно, доехало ли обновление или браузер держит старый кэш
-const GAME_VERSION = 'v0.7';
+// Версия игры: БАМПИТЬ ПРИ КАЖДОМ ДЕПЛОЕ мелкими шагами (v0.71, v0.72, …);
+// v1.0 — готовая игра. Выводится сверху экрана из JS — по номеру видно,
+// доехало ли обновление или браузер держит старый кэш
+const GAME_VERSION = 'v0.71';
 
 // Версия ассетов: GitHub Pages кэширует на 10 минут (max-age=600) — без
 // query-параметра после редеплоя браузер подмешивает старые файлы к новым
-const ASSET_V = '4';
+const ASSET_V = '5';
 const av = url => url + '?v=' + ASSET_V;
 
 const canvas = document.getElementById('c');
@@ -91,7 +92,7 @@ const SOUND_FILES = {};
 for (const n of [
   'm4_shot', 'm4_boltpull', 'm4_clipin', 'm4_clipout', 'm4_deploy',
   'ak_shot', 'ak_boltpull', 'ak_clipin', 'ak_clipout',
-  'usp_shot', 'usp_clipin', 'usp_clipout', 'usp_slide',
+  'glock_shot', 'glock_clipin', 'glock_clipout', 'glock_slideback', 'glock_sliderelease',
   'knife_deploy', 'knife_slash1', 'knife_slash2', 'knife_hit1', 'knife_hit2', 'knife_hitwall', 'knife_stab',
   'dryfire', 'dryfire_pistol', 'headshot1', 'headshot2', 'death1', 'death2',
   'step1', 'step2', 'step3', 'step4',
@@ -127,10 +128,11 @@ const downRay = new THREE.Ray(new THREE.Vector3(), new THREE.Vector3(0, -1, 0));
 
 // --- бой ---
 const viewmodel = new ViewModel();
-// арсенал: 1 — AK-47 (основное), 2 — USP, 3 — нож, 4 — M4A1 (временно, до магазина)
+// арсенал: 1 — AK-47 (основное), 2 — Glock (пистолет с руками; USP вернётся,
+// когда найдём его модель с рабочими руками), 3 — нож, 4 — M4A1 (временно)
 const guns = {
   1: new Gun(WEAPONS.ak47),
-  2: new Gun(WEAPONS.usp),
+  2: new Gun(WEAPONS.glock),
   3: new Gun(WEAPONS.knife),
   4: new Gun(WEAPONS.m4a1),
 };
@@ -389,16 +391,24 @@ async function init() {
     })(),
     (async () => {
       try {
-        await withTimeout(viewmodel.loadWeapon('usp', av('./assets/usp.glb'), {
-          position: [0.17, -0.07, -0.3], rotation: [0, -Math.PI / 2, 0], scale: 0.26, muzzle: [0.17, -0.09, -0.55],
+        // Poly Pizza «Fps Rig» (J-Toastie): Glock-18 + руки, клипы Armature|Idle/Reload/Shoot
+        await withTimeout(viewmodel.loadWeapon('glock', av('./assets/glock.glb'), {
+          position: [-0.03, -0.11, -0.03], rotation: [0, 1.62, 0], scale: 0.045,
+          muzzle: [0.09, -0.06, -0.45],
         }, onWP(2)), WEAPON_TIMEOUT);
-      } catch { viewmodel.addProcedural('usp', buildProceduralPistol(), { muzzle: [0.17, -0.16, -0.5] }); }
+      } catch { viewmodel.addProcedural('glock', buildProceduralPistol(), { muzzle: [0.17, -0.16, -0.5] }); }
       onWP(2)(1);
     })(),
     (async () => {
       try {
+        // enari-engine fps_mine_sketch_m9.glb: нож М9 + руки, один таймлайн —
+        // границы клипов из fps_mine_sketch_m9.json той же игры (30 fps)
+        // удар не нарезаем: в GLB он обрезан на полпути (таймлайн кончается
+        // на 10 с из 12.6) — замах делает процедурный swing вьюмодели
         await withTimeout(viewmodel.loadWeapon('knife', av('./assets/knife.glb'), {
-          melee: true, position: [0.2, -0.02, -0.35], rotation: [0.35, 2.4, 0.1], scale: 0.45,
+          melee: true, position: [-0.05, 0.12, -0.12], rotation: [0, 0, 0], scale: 1,
+          subclips: { draw: [0.03, 2.3], idle: [2.35, 2.41] },
+          drawDuration: 0.8,
         }, onWP(3)), WEAPON_TIMEOUT);
       } catch { viewmodel.addProcedural('knife', buildProceduralKnife(), { melee: true }); }
       onWP(3)(1);
@@ -574,6 +584,8 @@ const gameApi = {
     if (scale) model.scale.setScalar(scale);
     return true;
   },
+  vmSubclip: (id, name, t0, t1) => viewmodel.resubclip(id, name, t0, t1),
+  vm: viewmodel, // прямой доступ для отладочной примерки моделей
   vmInfo: () => Object.fromEntries(Object.entries(viewmodel.weapons).map(([id, w]) => {
     const b = new THREE.Box3().setFromObject(w.group);
     return [id, { min: b.min.toArray().map(v => +v.toFixed(2)), max: b.max.toArray().map(v => +v.toFixed(2)) }];

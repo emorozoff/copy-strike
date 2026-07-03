@@ -73,9 +73,19 @@ export class ViewModel {
 
     const mixer = new THREE.AnimationMixer(model);
     const actions = {};
-    const find = re => gltf.animations.find(a => re.test(a.name)) ?? null;
+    // Некоторые модели несут один общий таймлайн вместо отдельных клипов —
+    // opts.subclips = { idle: [сек, сек], shoot: [...], draw: [...] } режет его
+    // (границы из разметки исходной игры; кадры = секунды × 30 fps)
+    let anims = gltf.animations;
+    if (opts.subclips) {
+      const master = anims.reduce((a, b) => (b.tracks.length > a.tracks.length ? b : a));
+      anims = Object.entries(opts.subclips).map(([name, [t0, t1]]) =>
+        THREE.AnimationUtils.subclip(master, name, Math.round(t0 * 30), Math.round(t1 * 30), 30));
+    }
+    const find = re => anims.find(a => re.test(a.name)) ?? null;
     const clips = {
-      idle: find(/firstperson_idle|(^|_)idle/i),
+      // (^|[_|]) — клипы бывают и «idle», и «firstperson_idle», и «Armature|Idle»
+      idle: find(/firstperson_idle|(^|[_|])idle/i),
       reload: find(/firstperson_reload|reload/i),
       draw: find(/firstperson_draw|draw|deploy|equip|switch/i),
       shoot: find(/shoot_unsilenced_additive|shoot.*additive/i) ?? find(/shoot|fire|attack|slash/i),
@@ -83,6 +93,8 @@ export class ViewModel {
     if (clips.idle) {
       actions.idle = mixer.clipAction(clips.idle);
     }
+    // битый клип выстрела (нулевая длительность) хуже, чем его отсутствие
+    if (clips.shoot && clips.shoot.duration < 0.05) clips.shoot = null;
     if (clips.shoot) {
       actions.shootAdditive = /additive/i.test(clips.shoot.name);
       if (actions.shootAdditive) {
@@ -112,8 +124,24 @@ export class ViewModel {
       }
     });
 
-    this.weapons[id] = { group, mixer, actions, opts };
+    this.weapons[id] = { group, mixer, actions, opts, masterClip: opts.subclips ? gltf.animations.reduce((a, b) => (b.tracks.length > a.tracks.length ? b : a)) : null };
     return this.weapons[id];
+  }
+
+  // Отладочная перенарезка клипа из общего таймлайна (подбор границ через __game)
+  resubclip(id, name, t0, t1) {
+    const w = this.weapons[id];
+    if (!w?.masterClip) return false;
+    const clip = THREE.AnimationUtils.subclip(w.masterClip, name, Math.round(t0 * 30), Math.round(t1 * 30), 30);
+    if (w.actions[name]) {
+      w.actions[name].stop();
+      w.mixer.uncacheAction(w.actions[name].getClip(), w.group.children[0]);
+    }
+    const a = w.mixer.clipAction(clip);
+    if (name !== 'idle') a.setLoop(THREE.LoopOnce);
+    w.actions[name] = a;
+    if (name === 'idle' && this.active === w) a.reset().setEffectiveWeight(1).play();
+    return true;
   }
 
   // Процедурная заглушка из примитивов, пока нет модели
@@ -138,7 +166,11 @@ export class ViewModel {
     if (w.actions.idle) w.actions.idle.reset().setEffectiveWeight(1).play();
     if (w.actions.draw) {
       if (w.actions.idle) w.actions.idle.fadeOut(0.05);
-      w.actions.draw.reset().play();
+      const draw = w.actions.draw;
+      draw.reset();
+      // родные клипы доставания бывают по 2+ с — ужимаем под deployTime игры
+      if (w.opts.drawDuration) draw.timeScale = draw.getClip().duration / w.opts.drawDuration;
+      draw.play();
     }
     this.ready = true;
     return true;

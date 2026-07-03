@@ -17,6 +17,7 @@ const AK_KICK = [
 ];
 const M4_KICK = AK_KICK.map(([u, s]) => [+(u * 0.78).toFixed(3), +(s * 0.8).toFixed(3)]);
 const USP_KICK = [[1.35, 0.15]];
+const GLOCK_KICK = [[1.1, 0.12]];
 const KNIFE_KICK = [[0.25, 0]];
 
 export const WEAPONS = {
@@ -53,6 +54,18 @@ export const WEAPONS = {
     kick: USP_KICK,
     sounds: { fire: ['usp_shot'], dry: 'dryfire_pistol', deploy: 'usp_slide' },
     reloadSounds: [[0.5, 'usp_clipout'], [1.2, 'usp_clipin'], [1.75, 'usp_slide']],
+  },
+  glock: {
+    id: 'glock', name: 'GLOCK-18', slotLabel: '2',
+    damage: 28, rpm: 400, magSize: 20, reserveMax: 40,
+    reloadTime: 2.2, deployTime: 0.7,
+    semiAuto: true,
+    headMult: 4, legMult: 0.75,
+    rangeModifier: 0.75, rangeUnit: 12.7,
+    baseSpread: 0.0024, sprayGrowth: 0.002, movePenalty: 4, airPenalty: 0.03, crouchBonus: 0.7,
+    kick: GLOCK_KICK,
+    sounds: { fire: ['glock_shot'], dry: 'dryfire_pistol', deploy: 'glock_sliderelease' },
+    reloadSounds: [[0.5, 'glock_clipout'], [1.2, 'glock_clipin'], [1.75, 'glock_slideback']],
   },
   knife: {
     id: 'knife', name: 'НОЖ', slotLabel: '3',
