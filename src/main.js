@@ -18,6 +18,10 @@ THREE.Mesh.prototype.raycast = acceleratedRaycast;
 const params = new URLSearchParams(location.search);
 const DEBUG = params.has('debug');
 
+// Версия игры: БАМПИТЬ ПРИ КАЖДОМ ДЕПЛОЕ. Выводится сверху экрана из JS —
+// по номеру видно, доехало ли обновление или браузер держит старый кэш
+const GAME_VERSION = 'v0.6';
+
 // Версия ассетов: GitHub Pages кэширует на 10 минут (max-age=600) — без
 // query-параметра после редеплоя браузер подмешивает старые файлы к новым
 const ASSET_V = '4';
@@ -34,6 +38,9 @@ const loadNoteEl = document.getElementById('loadNote');
 const clickToPlayEl = document.getElementById('clickToPlay');
 const playBtn = document.getElementById('play');
 const editorPanelEl = document.getElementById('editorPanel');
+
+document.getElementById('ver').textContent = 'COPY-STRIKE ' + GAME_VERSION;
+document.title = 'COPY-STRIKE ' + GAME_VERSION;
 
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));

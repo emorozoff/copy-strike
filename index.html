@@ -30,15 +30,19 @@
   #hitmark.head::before,#hitmark.head::after{background:#ff5b45}
   #hitmark.show{opacity:.9}
   #editorPanel{position:fixed;top:10px;right:12px;font-size:11px;color:#d8a13a;text-align:right;white-space:pre;z-index:5;text-shadow:0 1px 2px #000}
+  /* версия поверх всего (z-index выше оверлеев): видна и на загрузке, и в игре;
+     номер выставляет main.js — если наверху старый номер, JS загрузился из кэша */
+  #ver{position:fixed;top:8px;left:50%;transform:translateX(-50%);font-size:12px;color:#d8a13a;letter-spacing:.15em;z-index:11;text-shadow:0 1px 2px #000}
 </style>
 </head>
 <body>
 <canvas id="c"></canvas>
+<div id="ver">v?</div>
 <div id="hud"></div>
 <div id="cross"></div>
 <div id="hitmark"></div>
 <div id="ammo" class="hidden"></div>
-<div id="hint">v0.5 · фаза 1 · <a href="net-test.html" style="color:#8f8a7a">сетевой тест</a></div>
+<div id="hint">фаза 1 · <a href="net-test.html" style="color:#8f8a7a">сетевой тест</a></div>
 <div id="editorPanel" class="hidden"></div>
 
 <div id="loading" class="overlay">
