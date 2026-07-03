@@ -7,7 +7,7 @@ import { PlayerController, MOVE } from './world/movement.js';
 import { Input, setupPointerLock } from './player/input.js';
 import { PointEditor } from './dev/editor.js';
 import { WEAPONS, Gun, currentSpread, shotDirection, computeDamage } from './combat/weapons.js';
-import { ViewModel, buildProceduralKnife, buildProceduralPistol } from './combat/viewmodel.js';
+import { ViewModel, buildProceduralPistol } from './combat/viewmodel.js';
 import { Effects } from './combat/effects.js';
 import { Dummy } from './combat/dummy.js';
 
@@ -21,7 +21,7 @@ const DEBUG = params.has('debug');
 // Версия игры: БАМПИТЬ ПРИ КАЖДОМ ДЕПЛОЕ мелкими шагами (v0.71, v0.72, …);
 // v1.0 — готовая игра. Выводится сверху экрана из JS — по номеру видно,
 // доехало ли обновление или браузер держит старый кэш
-const GAME_VERSION = 'v0.71';
+const GAME_VERSION = 'v0.72';
 
 // Версия ассетов: GitHub Pages кэширует на 10 минут (max-age=600) — без
 // query-параметра после редеплоя браузер подмешивает старые файлы к новым
@@ -90,10 +90,8 @@ window.addEventListener('resize', () => {
 const audio = new AudioManager();
 const SOUND_FILES = {};
 for (const n of [
-  'm4_shot', 'm4_boltpull', 'm4_clipin', 'm4_clipout', 'm4_deploy',
   'ak_shot', 'ak_boltpull', 'ak_clipin', 'ak_clipout',
   'glock_shot', 'glock_clipin', 'glock_clipout', 'glock_slideback', 'glock_sliderelease',
-  'knife_deploy', 'knife_slash1', 'knife_slash2', 'knife_hit1', 'knife_hit2', 'knife_hitwall', 'knife_stab',
   'dryfire', 'dryfire_pistol', 'headshot1', 'headshot2', 'death1', 'death2',
   'step1', 'step2', 'step3', 'step4',
 ]) SOUND_FILES[n] = av(`./assets/sounds/${n}.wav`);
@@ -128,15 +126,13 @@ const downRay = new THREE.Ray(new THREE.Vector3(), new THREE.Vector3(0, -1, 0));
 
 // --- бой ---
 const viewmodel = new ViewModel();
-// арсенал: 1 — AK-47 (основное), 2 — Glock (пистолет с руками; USP вернётся,
-// когда найдём его модель с рабочими руками), 3 — нож, 4 — M4A1 (временно)
+// арсенал: 1 — AK-47, 2 — Glock. Нож и M4 убраны (решение игрока 2026-07-04);
+// M4/USP вернутся с магазином в фазе 4
 const guns = {
   1: new Gun(WEAPONS.ak47),
   2: new Gun(WEAPONS.glock),
-  3: new Gun(WEAPONS.knife),
-  4: new Gun(WEAPONS.m4a1),
 };
-const SLOT_ORDER = [1, 2, 3, 4];
+const SLOT_ORDER = [1, 2];
 let activeSlot = 1;
 let deployT = 0;                      // достаём оружие — стрелять нельзя
 const punch = { pitch: 0, yaw: 0 };   // view-punch от отдачи
@@ -363,7 +359,7 @@ async function init() {
   loadPct = 0;
   paintLoadNote();
   barFillEl.style.width = '0%'; // вторая полоска: оружие
-  const wProgress = [0, 0, 0, 0];
+  const wProgress = [0, 0];
   const onWP = i => p => {
     if (p !== null) wProgress[i] = Math.min(1, p);
     loadPct = Math.round(wProgress.reduce((a, b) => a + b, 0) / wProgress.length * 100);
@@ -371,47 +367,24 @@ async function init() {
     barFillEl.style.width = loadPct + '%';
   };
   const WEAPON_TIMEOUT = 60_000;
-  const M4_OPTS = { muzzle: [0.14, -0.11, -0.95] };
   const AK_OPTS = { // параметры из исходников fps-threejs-game + разворот к −Z
     position: [0.04, -0.02, 0], rotation: [0, Math.PI, 0], scale: 0.05, muzzle: [0.055, -0.045, -0.42],
   };
   await Promise.all([
     (async () => {
-      try { await withTimeout(viewmodel.loadWeapon('m4a1', av('./assets/m4a1.glb'), M4_OPTS, onWP(0)), WEAPON_TIMEOUT); }
-      catch { viewmodel.addProcedural('m4a1', buildProceduralPistol(), M4_OPTS); }
+      try { await withTimeout(viewmodel.loadWeapon('ak47', av('./assets/ak47.glb'), AK_OPTS, onWP(0)), WEAPON_TIMEOUT); }
+      catch { viewmodel.addProcedural('ak47', buildProceduralPistol(), AK_OPTS); }
       onWP(0)(1);
-    })(),
-    (async () => {
-      try { await withTimeout(viewmodel.loadWeapon('ak47', av('./assets/ak47.glb'), AK_OPTS, onWP(1)), WEAPON_TIMEOUT); }
-      catch {
-        try { await withTimeout(viewmodel.loadWeapon('ak47', av('./assets/m4a1.glb'), M4_OPTS), WEAPON_TIMEOUT); }
-        catch { viewmodel.addProcedural('ak47', buildProceduralPistol(), M4_OPTS); }
-      }
-      onWP(1)(1);
     })(),
     (async () => {
       try {
         // Poly Pizza «Fps Rig» (J-Toastie): Glock-18 + руки, клипы Armature|Idle/Reload/Shoot
         await withTimeout(viewmodel.loadWeapon('glock', av('./assets/glock.glb'), {
-          position: [-0.03, -0.11, -0.03], rotation: [0, 1.62, 0], scale: 0.045,
-          muzzle: [0.09, -0.06, -0.45],
-        }, onWP(2)), WEAPON_TIMEOUT);
+          position: [-0.03, -0.2, -0.28], rotation: [0, 1.62, 0], scale: 0.06,
+          muzzle: [0.17, -0.04, -0.6],
+        }, onWP(1)), WEAPON_TIMEOUT);
       } catch { viewmodel.addProcedural('glock', buildProceduralPistol(), { muzzle: [0.17, -0.16, -0.5] }); }
-      onWP(2)(1);
-    })(),
-    (async () => {
-      try {
-        // enari-engine fps_mine_sketch_m9.glb: нож М9 + руки, один таймлайн —
-        // границы клипов из fps_mine_sketch_m9.json той же игры (30 fps)
-        // удар не нарезаем: в GLB он обрезан на полпути (таймлайн кончается
-        // на 10 с из 12.6) — замах делает процедурный swing вьюмодели
-        await withTimeout(viewmodel.loadWeapon('knife', av('./assets/knife.glb'), {
-          melee: true, position: [-0.05, 0.12, -0.12], rotation: [0, 0, 0], scale: 1,
-          subclips: { draw: [0.03, 2.3], idle: [2.35, 2.41] },
-          drawDuration: 0.8,
-        }, onWP(3)), WEAPON_TIMEOUT);
-      } catch { viewmodel.addProcedural('knife', buildProceduralKnife(), { melee: true }); }
-      onWP(3)(1);
+      onWP(1)(1);
     })(),
   ]);
   viewmodel.setActive('ak47');
@@ -450,7 +423,7 @@ input.onKeyDown = code => {
     return;
   }
   if (editor.active) { editor.handleKey(code, input); return; }
-  const m = /^Digit([1-4])$/.exec(code);
+  const m = /^Digit([1-2])$/.exec(code);
   if (m) switchTo(+m[1]);
 };
 
