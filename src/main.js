@@ -10,6 +10,7 @@ import { WEAPONS, Gun, currentSpread, shotDirection, computeDamage } from './com
 import { ViewModel, buildProceduralPistol } from './combat/viewmodel.js';
 import { Effects } from './combat/effects.js';
 import { Dummy } from './combat/dummy.js';
+import { MenuFx } from './ui/fx.js';
 
 THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
 THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
@@ -21,7 +22,7 @@ const DEBUG = params.has('debug');
 // Версия игры: БАМПИТЬ ПРИ КАЖДОМ ДЕПЛОЕ мелкими шагами (v0.71, v0.72, …);
 // v1.0 — готовая игра. Выводится сверху экрана из JS — по номеру видно,
 // доехало ли обновление или браузер держит старый кэш
-const GAME_VERSION = 'v0.72';
+const GAME_VERSION = 'v0.73';
 
 // Версия ассетов: GitHub Pages кэширует на 10 минут (max-age=600) — без
 // query-параметра после редеплоя браузер подмешивает старые файлы к новым
@@ -33,12 +34,16 @@ const hudEl = document.getElementById('hud');
 const ammoEl = document.getElementById('ammo');
 const hitmarkEl = document.getElementById('hitmark');
 const hintEl = document.getElementById('hint');
-const loadingEl = document.getElementById('loading');
-const barFillEl = document.getElementById('barFill');
-const loadNoteEl = document.getElementById('loadNote');
-const clickToPlayEl = document.getElementById('clickToPlay');
-const playBtn = document.getElementById('play');
+const crossEl = document.getElementById('cross');
 const editorPanelEl = document.getElementById('editorPanel');
+const uiRootEl = document.getElementById('uiRoot');
+const loadingEl = document.getElementById('loading');
+const menuEl = document.getElementById('menu');
+const pauseEl = document.getElementById('pause');
+const settingsEl = document.getElementById('settings');
+const ldFillEl = document.getElementById('ldFill');
+const ldPctEl = document.getElementById('ldPct');
+const loadNoteEl = document.getElementById('loadNote');
 
 document.getElementById('ver').textContent = 'COPY-STRIKE ' + GAME_VERSION;
 document.title = 'COPY-STRIKE ' + GAME_VERSION;
@@ -53,12 +58,63 @@ const LOAD_QUIPS = [
 let quipI = Math.floor(Math.random() * LOAD_QUIPS.length);
 let loadPct = null; // null — размер неизвестен, процент не пишем
 const paintLoadNote = () => {
-  loadNoteEl.textContent = LOAD_QUIPS[quipI] + '…' + (loadPct !== null ? ` ${loadPct}%` : '');
+  loadNoteEl.textContent = LOAD_QUIPS[quipI] + '…';
+  if (loadPct !== null) {
+    ldFillEl.style.width = loadPct + '%';
+    ldPctEl.textContent = loadPct + '%';
+    // подпись процентов едет за краем заливки, у правого края останавливается
+    ldPctEl.style.left = `min(calc(${loadPct}% + 12px), calc(100% - 58px))`;
+  }
 };
 const loadTicker = setInterval(() => {
   quipI = (quipI + 1) % LOAD_QUIPS.length;
   paintLoadNote();
 }, 1400);
+
+// --- состояния интерфейса: loading → menu → game (+pause/settings поверх) ---
+const fx = new MenuFx(document.getElementById('fx'));
+fx.start();
+let uiState = 'loading';
+let settingsReturn = 'menu'; // откуда открыты настройки
+const PANELS = { loading: loadingEl, menu: menuEl, pause: pauseEl, settings: settingsEl };
+
+function showUI(state) {
+  uiState = state;
+  for (const [name, el] of Object.entries(PANELS)) el.classList.toggle('hidden', name !== state);
+  const inGame = state === 'game';
+  uiRootEl.classList.toggle('hidden', inGame);
+  uiRootEl.classList.toggle('dark', state === 'loading');
+  for (const el of [hudEl, crossEl, ammoEl, hintEl]) el.classList.toggle('hidden', !inGame);
+  if (inGame) fx.stop(); else fx.start();
+}
+
+// --- настройки: чувствительность и громкость, живут в localStorage ---
+const sensRange = document.getElementById('sensRange');
+const volRange = document.getElementById('volRange');
+const sensOut = document.getElementById('sensOut');
+const volOut = document.getElementById('volOut');
+const BASE_SENS = 0.0023;
+
+function applySettings(s) {
+  input.sensitivity = BASE_SENS * s.sens;
+  if (audio.master) audio.master.gain.value = s.vol;
+  sensRange.value = s.sens; volRange.value = s.vol;
+  sensOut.textContent = '×' + (+s.sens).toFixed(2);
+  volOut.textContent = Math.round(s.vol * 100) + '%';
+}
+function loadSettings() {
+  try { return { sens: 1, vol: 0.6, ...JSON.parse(localStorage.getItem('copys-settings') ?? '{}') }; }
+  catch { return { sens: 1, vol: 0.6 }; }
+}
+const settingsState = loadSettings();
+const onSettingsInput = () => {
+  settingsState.sens = +sensRange.value;
+  settingsState.vol = +volRange.value;
+  applySettings(settingsState);
+  localStorage.setItem('copys-settings', JSON.stringify(settingsState));
+};
+sensRange.addEventListener('input', onSettingsInput);
+volRange.addEventListener('input', onSettingsInput);
 
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
@@ -99,20 +155,40 @@ audio.loadAll(SOUND_FILES);
 
 const input = new Input();
 const editor = new PointEditor(scene, editorPanelEl);
+applySettings(settingsState);
 
 let deployPlayed = false;
 const lock = setupPointerLock(canvas, input, {
   onLock: () => {
-    clickToPlayEl.classList.add('hidden');
+    showUI('game');
     if (!deployPlayed) {
       deployPlayed = true;
       const d = guns[activeSlot].def.sounds.deploy;
       if (d) audio.play(d, { volume: 0.5 });
     }
   },
-  onUnlock: () => { if (!DEBUG) clickToPlayEl.classList.remove('hidden'); },
+  // Esc в игре снимает pointer lock — показываем паузу (в дебаге не мешаем тестам)
+  onUnlock: () => { if (!DEBUG && uiState === 'game' && !editor.active) showUI('pause'); },
 });
-playBtn.addEventListener('click', () => { audio.init(); lock.request(); });
+
+document.getElementById('btnTrain').addEventListener('click', () => {
+  audio.init();
+  showUI('game');
+  lock.request();
+});
+document.getElementById('btnResume').addEventListener('click', () => {
+  // повторный захват мыши браузер разрешает через ~1.3 с после Esc —
+  // ранний клик просто ничего не сделает, второй клик сработает
+  audio.init();
+  lock.request();
+});
+document.getElementById('btnToMenu').addEventListener('click', () => showUI('menu'));
+document.getElementById('btnSettings').addEventListener('click', () => { settingsReturn = 'menu'; showUI('settings'); });
+document.getElementById('btnPauseSettings').addEventListener('click', () => { settingsReturn = 'pause'; showUI('settings'); });
+document.getElementById('btnBack').addEventListener('click', () => showUI(settingsReturn));
+window.addEventListener('keydown', e => {
+  if (e.code === 'Escape' && uiState === 'settings') showUI(settingsReturn);
+});
 
 window.addEventListener('wheel', e => {
   if (editor.active) editor.changeSpeed(e.deltaY);
@@ -333,12 +409,12 @@ async function init() {
       // и превышает Content-Length — без клампа прогресс уезжает за 100%
       loadPct = Math.min(100, Math.round(p * 100));
       paintLoadNote();
-      barFillEl.style.width = loadPct + '%';
     },
     async () => {
       // сообщение должно УСПЕТЬ отрисоваться до синхронного построения BVH
+      loadPct = 100;
+      paintLoadNote();
       loadNoteEl.textContent = 'строим стены…';
-      barFillEl.style.width = '100%';
       await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
     },
     mapData?.colliders ?? []
@@ -356,15 +432,13 @@ async function init() {
 
   // Оружие: все модели ПАРАЛЛЕЛЬНО (время = самый тяжёлый файл, не сумма),
   // с общим прогрессом и таймаутом на каждую — игра стартует в любом случае.
-  loadPct = 0;
+  loadPct = 0; // вторая полоска: оружие
   paintLoadNote();
-  barFillEl.style.width = '0%'; // вторая полоска: оружие
   const wProgress = [0, 0];
   const onWP = i => p => {
     if (p !== null) wProgress[i] = Math.min(1, p);
     loadPct = Math.round(wProgress.reduce((a, b) => a + b, 0) / wProgress.length * 100);
     paintLoadNote();
-    barFillEl.style.width = loadPct + '%';
   };
   const WEAPON_TIMEOUT = 60_000;
   const AK_OPTS = { // параметры из исходников fps-threejs-game + разворот к −Z
@@ -401,8 +475,9 @@ async function init() {
   updateAmmoHud();
 
   clearInterval(loadTicker);
-  loadingEl.classList.add('hidden');
-  if (!DEBUG) clickToPlayEl.classList.remove('hidden');
+  // в дебаге (headless-тесты) меню пропускаем — сразу в игру; ?menu вернёт меню
+  if (DEBUG && !params.has('menu')) showUI('game');
+  else showUI('menu');
 
   startLoop({ tick, render });
   gameApi.ready = true;
@@ -485,21 +560,36 @@ function tick(dt) {
 }
 
 let hudTimer = 0;
+let menuT = Math.random() * 200; // фаза облёта карты в меню
 const camPos = new THREE.Vector3();
 function render(delta, fps, alpha) {
-  if (editor.active) {
+  // в меню и настройках-из-меню камера медленно облетает карту;
+  // в паузе (и настройках из паузы) остаётся вид игрока за виньеткой
+  const worldView = uiState === 'game' || uiState === 'pause' ||
+    (uiState === 'settings' && settingsReturn === 'pause');
+
+  if (!worldView && !editor.active) {
+    menuT += delta;
+    const yaw = menuT * 0.045;
+    camera.position.set(Math.sin(yaw) * 58, 48, Math.cos(yaw) * 58);
+    camera.lookAt(0, -2, 0);
+  } else if (editor.active) {
     camera.position.copy(editor.position);
+    camera.rotation.set(
+      THREE.MathUtils.clamp(input.pitch + punch.pitch, -PITCH_LIM, PITCH_LIM),
+      input.yaw + punch.yaw, 0
+    );
   } else {
     // интерполяция между тиками: позиция прошлого тика → текущего
     camPos.copy(player.prevPosition).lerp(player.position, Math.min(alpha, 1));
     camera.position.set(camPos.x, camPos.y + player.eyeHeight, camPos.z);
+    // композитный pitch клампим: punch при стрельбе строго вверх мог перекинуть
+    // камеру за зенит (переворот мира)
+    camera.rotation.set(
+      THREE.MathUtils.clamp(input.pitch + punch.pitch, -PITCH_LIM, PITCH_LIM),
+      input.yaw + punch.yaw, 0
+    );
   }
-  // композитный pitch клампим: punch при стрельбе строго вверх мог перекинуть
-  // камеру за зенит (переворот мира)
-  camera.rotation.set(
-    THREE.MathUtils.clamp(input.pitch + punch.pitch, -PITCH_LIM, PITCH_LIM),
-    input.yaw + punch.yaw, 0
-  );
 
   hudTimer += delta;
   if (hudTimer > 0.25) {
@@ -515,7 +605,7 @@ function render(delta, fps, alpha) {
 
   renderer.clear();
   renderer.render(scene, camera);
-  if (viewmodel.ready && !editor.active) {
+  if (viewmodel.ready && !editor.active && worldView) {
     const hspeed = player ? Math.hypot(player.velocity.x, player.velocity.z) : 0;
     viewmodel.update(delta, { hspeed, onGround: player?.onGround, yaw: input.yaw, pitch: input.pitch });
     renderer.clearDepth();
