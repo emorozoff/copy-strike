@@ -71,12 +71,12 @@ export const WEAPONS = {
   },
 };
 
-// Перезарядка на 30% дольше оригинала CS (решение игрока 2026-07-03).
-// В defs выше — оригинальные тайминги CS; здесь длительность и звуки
-// множатся одним коэффициентом, а анимация растягивается под reloadTime
-// через timeScale в viewmodel.playReload — тайминг, звук и картинка
-// синхронны по построению.
-const RELOAD_MULT = 1.3;
+// Перезарядка дольше оригинала CS (решение игрока 2026-07-03: сначала +30%,
+// затем ещё +30% — итого ×1.69). В defs выше — оригинальные тайминги CS;
+// здесь длительность и звуки множатся одним коэффициентом, а анимация
+// растягивается под reloadTime через timeScale в viewmodel.playReload —
+// тайминг, звук и картинка синхронны по построению.
+const RELOAD_MULT = 1.69;
 for (const def of Object.values(WEAPONS)) {
   def.reloadTime *= RELOAD_MULT;
   def.reloadSounds = def.reloadSounds.map(([t, name]) => [t * RELOAD_MULT, name]);
@@ -94,10 +94,14 @@ export class Gun {
     this.reloadT = -1;
     this.dryCooldown = 0;
     this.prevWantFire = false;
+    this.sinceShot = 999; // сек с последнего выстрела
   }
 
   get reloading() { return this.reloadT >= 0; }
-  get firingRecently() { return this.burstReset > 0; }
+  // Окно «ствол держится наверху»: чуть больше межвыстрельного интервала АК
+  // (0.1 с). Раньше тут был burstReset (0.45 с) — punch висел почти полсекунды
+  // после отпускания кнопки, и прицел возвращался с ощутимым лагом.
+  get firingRecently() { return this.sinceShot < 0.12; }
 
   cancelReload() { this.reloadT = -1; }
 
@@ -113,6 +117,7 @@ export class Gun {
   update(dt, wantFire, wantReload) {
     this.cooldown -= dt;
     this.dryCooldown -= dt;
+    this.sinceShot += dt;
     this.burstReset -= dt;
     if (this.burstReset <= 0) this.burstIdx = 0;
 
@@ -150,7 +155,8 @@ export class Gun {
       this.cooldown += 60 / this.def.rpm;
       const idx = Math.min(this.burstIdx, this.def.kick.length - 1);
       this.burstIdx++;
-      this.burstReset = 0.45;
+      this.burstReset = 0.45; // окно продолжения спрей-паттерна (индекс очереди)
+      this.sinceShot = 0;
       return { type: 'fire', kick: this.def.kick[idx], burstIdx: idx };
     }
     return null;

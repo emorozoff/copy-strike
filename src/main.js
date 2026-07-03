@@ -20,7 +20,7 @@ const DEBUG = params.has('debug');
 
 // Версия игры: БАМПИТЬ ПРИ КАЖДОМ ДЕПЛОЕ. Выводится сверху экрана из JS —
 // по номеру видно, доехало ли обновление или браузер держит старый кэш
-const GAME_VERSION = 'v0.6';
+const GAME_VERSION = 'v0.7';
 
 // Версия ассетов: GitHub Pages кэширует на 10 минут (max-age=600) — без
 // query-параметра после редеплоя браузер подмешивает старые файлы к новым
@@ -41,6 +41,23 @@ const editorPanelEl = document.getElementById('editorPanel');
 
 document.getElementById('ver').textContent = 'COPY-STRIKE ' + GAME_VERSION;
 document.title = 'COPY-STRIKE ' + GAME_VERSION;
+
+// «Живая» загрузка: забавные статусы сменяют друг друга, процент — честный
+const LOAD_QUIPS = [
+  'выдаём патроны', 'расставляем коробки', 'протираем прицел',
+  'завозим песок', 'подметаем лонг', 'смазываем затворы',
+  'будим манекенов', 'прикручиваем мушку', 'заряжаем магазины',
+  'проверяем двери на B', 'копаем яму на лонге', 'настраиваем эхо в тоннелях',
+];
+let quipI = Math.floor(Math.random() * LOAD_QUIPS.length);
+let loadPct = null; // null — размер неизвестен, процент не пишем
+const paintLoadNote = () => {
+  loadNoteEl.textContent = LOAD_QUIPS[quipI] + '…' + (loadPct !== null ? ` ${loadPct}%` : '');
+};
+const loadTicker = setInterval(() => {
+  quipI = (quipI + 1) % LOAD_QUIPS.length;
+  paintLoadNote();
+}, 1400);
 
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
@@ -309,20 +326,20 @@ const withTimeout = (promise, ms) => Promise.race([
 
 async function init() {
   const mapData = await loadMapData(av('./assets/map-data.json')); // 0.5 КБ, мгновенно
-  loadNoteEl.textContent = 'загрузка карты…';
+  paintLoadNote();
   const map = await loadMap(
     av('./assets/de_dust2.glb'),
     p => {
-      if (p === null) { loadNoteEl.textContent = 'загрузка карты… (размер неизвестен)'; return; }
+      if (p === null) { paintLoadNote(); return; }
       // GH Pages отдаёт gzip: «загружено» считается по распакованным байтам
       // и превышает Content-Length — без клампа прогресс уезжает за 100%
-      const pct = Math.min(100, Math.round(p * 100));
-      loadNoteEl.textContent = `загрузка карты… ${pct}%`;
-      barFillEl.style.width = pct + '%';
+      loadPct = Math.min(100, Math.round(p * 100));
+      paintLoadNote();
+      barFillEl.style.width = loadPct + '%';
     },
     async () => {
       // сообщение должно УСПЕТЬ отрисоваться до синхронного построения BVH
-      loadNoteEl.textContent = 'построение коллизий…';
+      loadNoteEl.textContent = 'строим стены…';
       barFillEl.style.width = '100%';
       await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
     },
@@ -341,14 +358,15 @@ async function init() {
 
   // Оружие: все модели ПАРАЛЛЕЛЬНО (время = самый тяжёлый файл, не сумма),
   // с общим прогрессом и таймаутом на каждую — игра стартует в любом случае.
-  loadNoteEl.textContent = 'загрузка оружия… 0%';
-  barFillEl.style.width = '0%';
+  loadPct = 0;
+  paintLoadNote();
+  barFillEl.style.width = '0%'; // вторая полоска: оружие
   const wProgress = [0, 0, 0, 0];
   const onWP = i => p => {
     if (p !== null) wProgress[i] = Math.min(1, p);
-    const pct = Math.round(wProgress.reduce((a, b) => a + b, 0) / wProgress.length * 100);
-    loadNoteEl.textContent = `загрузка оружия… ${pct}%`;
-    barFillEl.style.width = pct + '%';
+    loadPct = Math.round(wProgress.reduce((a, b) => a + b, 0) / wProgress.length * 100);
+    paintLoadNote();
+    barFillEl.style.width = loadPct + '%';
   };
   const WEAPON_TIMEOUT = 60_000;
   const M4_OPTS = { muzzle: [0.14, -0.11, -0.95] };
@@ -399,6 +417,7 @@ async function init() {
   }
   updateAmmoHud();
 
+  clearInterval(loadTicker);
   loadingEl.classList.add('hidden');
   if (!DEBUG) clickToPlayEl.classList.remove('hidden');
 
@@ -472,8 +491,9 @@ function tick(dt) {
   }
 
   // Затухание view-punch: пока стреляем — почти не возвращается (ствол
-  // держится наверху), после отпускания — быстрый возврат.
-  const lambda = gun.firingRecently ? 0.6 : 11;
+  // держится наверху), после отпускания — быстрый возврат (окно удержания
+  // 0.12 с задаёт gun.firingRecently; итоговый возврат ≈ 0.35 с как в CS).
+  const lambda = gun.firingRecently ? 0.6 : 13;
   punch.pitch = THREE.MathUtils.damp(punch.pitch, 0, lambda, dt);
   punch.yaw = THREE.MathUtils.damp(punch.yaw, 0, lambda, dt);
 
@@ -569,6 +589,7 @@ const gameApi = {
 window.__game = gameApi;
 
 init().catch(err => {
+  clearInterval(loadTicker); // иначе тикер затирает текст ошибки
   loadNoteEl.textContent = 'ОШИБКА: ' + err.message;
   console.error(err);
 });

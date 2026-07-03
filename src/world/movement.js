@@ -19,6 +19,7 @@ export const MOVE = {
   physicsSubsteps: 5,
   groundNormalY: 0.69,   // cos(~46°) — предел проходимого уклона (CS ≈ 45.6°)
   snapDistance: 0.15,    // прилипание к полу на спусках/ступенях, м за подшаг
+  stepHeight: 0.46,      // автозабег на ступени до 18 юнитов (CS), без прыжка
 };
 
 const tmpMat = new THREE.Matrix4();
@@ -30,6 +31,8 @@ const tmpDelta = new THREE.Vector3();
 const scratch = new THREE.Vector3();
 const tmpRay = new THREE.Ray();
 const DOWN = new THREE.Vector3(0, -1, 0);
+const savePos = new THREE.Vector3();
+const saveVel = new THREE.Vector3();
 
 export class PlayerController {
   constructor(collider) {
@@ -139,6 +142,9 @@ export class PlayerController {
     }
 
     const wasGround = this.onGround;
+    const px = this.position.x, py = this.position.y, pz = this.position.z;
+    const vx = this.velocity.x, vz = this.velocity.z;
+    const wantDist = wasGround ? Math.hypot(vx, vz) * dt : 0;
     this.position.addScaledVector(this.velocity, dt);
     this.collide(dt);
 
@@ -157,6 +163,47 @@ export class PlayerController {
         this.onGround = true;
         this.velocity.y = 0;
       }
+    }
+
+    // Автозабег на ступени: если на земле движение упёрлось (продвинулись
+    // меньше половины желаемого), пробуем то же движение с позиции, поднятой
+    // на stepHeight, и опускаемся на верх ступеньки.
+    if (wantDist > 1e-6) {
+      const got = Math.hypot(this.position.x - px, this.position.z - pz);
+      if (got < wantDist * 0.5) this.tryStepUp(dt, px, py, pz, vx, vz, got);
+    }
+  }
+
+  // Попытка перешагнуть препятствие до stepHeight. Принимается, только если
+  // дала больше горизонтального продвижения И приземлила на проходимый пол —
+  // у стен и крутых склонов попытка проваливается и всё откатывается.
+  tryStepUp(dt, px, py, pz, vx, vz, gotBefore) {
+    const M = MOVE;
+    savePos.copy(this.position);
+    saveVel.copy(this.velocity);
+    const keepGround = this.onGround;
+
+    this.position.set(px, py + M.stepHeight, pz);
+    this.velocity.set(vx, 0, vz);
+    this.position.addScaledVector(this.velocity, dt);
+    this.collide(dt);
+
+    tmpRay.origin.copy(this.position);
+    tmpRay.origin.y += 0.05;
+    tmpRay.direction.copy(DOWN);
+    const hit = this.collider.geometry.boundsTree.raycastFirst(tmpRay, THREE.DoubleSide);
+    const gotAfter = Math.hypot(this.position.x - px, this.position.z - pz);
+
+    if (hit && hit.distance <= 0.05 + M.stepHeight + M.snapDistance &&
+        hit.face && Math.abs(hit.face.normal.y) > M.groundNormalY &&
+        gotAfter > gotBefore + 1e-4) {
+      this.position.y -= hit.distance - 0.05;
+      this.onGround = true;
+      this.velocity.y = 0;
+    } else {
+      this.position.copy(savePos);
+      this.velocity.copy(saveVel);
+      this.onGround = keepGround;
     }
   }
 
