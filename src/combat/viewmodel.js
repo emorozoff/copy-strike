@@ -53,8 +53,12 @@ export class ViewModel {
     this.root.add(this.muzzleFlash);
   }
 
-  async loadWeapon(id, url, opts = {}) {
-    const gltf = await new Promise((res, rej) => new GLTFLoader().load(url, res, undefined, rej));
+  async loadWeapon(id, url, opts = {}, onProgress) {
+    const gltf = await new Promise((res, rej) => new GLTFLoader().load(
+      url, res,
+      e => { if (onProgress) onProgress(e.lengthComputable ? e.loaded / e.total : null); },
+      rej
+    ));
     const model = gltf.scene;
     // скиннед-меши анимируются за пределы исходного bbox — без этого
     // Three.js отсекает их фрустум-каллингом и оружие «исчезает»

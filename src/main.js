@@ -18,6 +18,11 @@ THREE.Mesh.prototype.raycast = acceleratedRaycast;
 const params = new URLSearchParams(location.search);
 const DEBUG = params.has('debug');
 
+// Версия ассетов: GitHub Pages кэширует на 10 минут (max-age=600) — без
+// query-параметра после редеплоя браузер подмешивает старые файлы к новым
+const ASSET_V = '4';
+const av = url => url + '?v=' + ASSET_V;
+
 const canvas = document.getElementById('c');
 const hudEl = document.getElementById('hud');
 const ammoEl = document.getElementById('ammo');
@@ -66,7 +71,7 @@ for (const n of [
   'knife_deploy', 'knife_slash1', 'knife_slash2', 'knife_hit1', 'knife_hit2', 'knife_hitwall', 'knife_stab',
   'dryfire', 'dryfire_pistol', 'headshot1', 'headshot2', 'death1', 'death2',
   'step1', 'step2', 'step3', 'step4',
-]) SOUND_FILES[n] = `./assets/sounds/${n}.wav`;
+]) SOUND_FILES[n] = av(`./assets/sounds/${n}.wav`);
 audio.loadAll(SOUND_FILES);
 
 const input = new Input();
@@ -284,12 +289,20 @@ function respawn() {
   }
 }
 
+// Загрузка не должна молча висеть: любой этап с таймаутом → фолбэк
+const withTimeout = (promise, ms) => Promise.race([
+  promise,
+  new Promise((_, rej) => setTimeout(() => rej(new Error('timeout ' + ms + 'ms')), ms)),
+]);
+
 async function init() {
-  const mapData = await loadMapData('./assets/map-data.json'); // 0.5 КБ, мгновенно
+  const mapData = await loadMapData(av('./assets/map-data.json')); // 0.5 КБ, мгновенно
+  loadNoteEl.textContent = 'загрузка карты…';
   const map = await loadMap(
-    './assets/de_dust2.glb',
+    av('./assets/de_dust2.glb'),
     p => {
-      if (p === null) { loadNoteEl.textContent = 'загрузка de_dust2… (размер неизвестен)'; return; }
+      if (p === null) { loadNoteEl.textContent = 'загрузка карты… (размер неизвестен)'; return; }
+      loadNoteEl.textContent = `загрузка карты… ${Math.round(p * 100)}%`;
       barFillEl.style.width = Math.round(p * 100) + '%';
     },
     async () => {
@@ -311,31 +324,53 @@ async function init() {
   player.killY = mapBounds.min.y - 5;
   respawn();
 
-  // оружие в руки: AK-47 основное; если модели нет — временно облик M4
+  // Оружие: все модели ПАРАЛЛЕЛЬНО (время = самый тяжёлый файл, не сумма),
+  // с общим прогрессом и таймаутом на каждую — игра стартует в любом случае.
+  loadNoteEl.textContent = 'загрузка оружия… 0%';
+  barFillEl.style.width = '0%';
+  const wProgress = [0, 0, 0, 0];
+  const onWP = i => p => {
+    if (p !== null) wProgress[i] = Math.min(1, p);
+    const pct = Math.round(wProgress.reduce((a, b) => a + b, 0) / wProgress.length * 100);
+    loadNoteEl.textContent = `загрузка оружия… ${pct}%`;
+    barFillEl.style.width = pct + '%';
+  };
+  const WEAPON_TIMEOUT = 60_000;
   const M4_OPTS = { muzzle: [0.14, -0.11, -0.95] };
-  await viewmodel.loadWeapon('m4a1', './assets/m4a1.glb', M4_OPTS);
-  try {
-    // параметры из исходников fps-threejs-game (автор модели) + разворот к −Z
-    await viewmodel.loadWeapon('ak47', './assets/ak47.glb', {
-      position: [0.04, -0.02, 0], rotation: [0, Math.PI, 0], scale: 0.05, muzzle: [0.055, -0.045, -0.42],
-    });
-  } catch {
-    await viewmodel.loadWeapon('ak47', './assets/m4a1.glb', M4_OPTS); // заглушка-облик
-  }
-  try {
-    await viewmodel.loadWeapon('usp', './assets/usp.glb', {
-      position: [0.17, -0.07, -0.3], rotation: [0, -Math.PI / 2, 0], scale: 0.26, muzzle: [0.17, -0.09, -0.55],
-    });
-  } catch {
-    viewmodel.addProcedural('usp', buildProceduralPistol(), { muzzle: [0.17, -0.16, -0.5] });
-  }
-  try {
-    await viewmodel.loadWeapon('knife', './assets/knife.glb', {
-      melee: true, position: [0.2, -0.02, -0.35], rotation: [0.35, 2.4, 0.1], scale: 0.45,
-    });
-  } catch {
-    viewmodel.addProcedural('knife', buildProceduralKnife(), { melee: true });
-  }
+  const AK_OPTS = { // параметры из исходников fps-threejs-game + разворот к −Z
+    position: [0.04, -0.02, 0], rotation: [0, Math.PI, 0], scale: 0.05, muzzle: [0.055, -0.045, -0.42],
+  };
+  await Promise.all([
+    (async () => {
+      try { await withTimeout(viewmodel.loadWeapon('m4a1', av('./assets/m4a1.glb'), M4_OPTS, onWP(0)), WEAPON_TIMEOUT); }
+      catch { viewmodel.addProcedural('m4a1', buildProceduralPistol(), M4_OPTS); }
+      onWP(0)(1);
+    })(),
+    (async () => {
+      try { await withTimeout(viewmodel.loadWeapon('ak47', av('./assets/ak47.glb'), AK_OPTS, onWP(1)), WEAPON_TIMEOUT); }
+      catch {
+        try { await withTimeout(viewmodel.loadWeapon('ak47', av('./assets/m4a1.glb'), M4_OPTS), WEAPON_TIMEOUT); }
+        catch { viewmodel.addProcedural('ak47', buildProceduralPistol(), M4_OPTS); }
+      }
+      onWP(1)(1);
+    })(),
+    (async () => {
+      try {
+        await withTimeout(viewmodel.loadWeapon('usp', av('./assets/usp.glb'), {
+          position: [0.17, -0.07, -0.3], rotation: [0, -Math.PI / 2, 0], scale: 0.26, muzzle: [0.17, -0.09, -0.55],
+        }, onWP(2)), WEAPON_TIMEOUT);
+      } catch { viewmodel.addProcedural('usp', buildProceduralPistol(), { muzzle: [0.17, -0.16, -0.5] }); }
+      onWP(2)(1);
+    })(),
+    (async () => {
+      try {
+        await withTimeout(viewmodel.loadWeapon('knife', av('./assets/knife.glb'), {
+          melee: true, position: [0.2, -0.02, -0.35], rotation: [0.35, 2.4, 0.1], scale: 0.45,
+        }, onWP(3)), WEAPON_TIMEOUT);
+      } catch { viewmodel.addProcedural('knife', buildProceduralKnife(), { melee: true }); }
+      onWP(3)(1);
+    })(),
+  ]);
   viewmodel.setActive('ak47');
   effects = new Effects(scene);
   const dummySpots = [
