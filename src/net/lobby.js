@@ -34,8 +34,10 @@ export class Lobby {
     this.rtt = null;
     this.onPeer = null;   // (connected: boolean) => void
     this.onStart = null;  // () => void — хост скомандовал старт
+    this.onSnap = null;   // (data, peerId) => void — снапшот состояния соперника
     this._pingTimer = null;
     this._startAction = null;
+    this._snapAction = null;
   }
 
   get connected() { return !!this.peerId; }
@@ -48,6 +50,12 @@ export class Lobby {
 
     this._startAction = this.room.makeAction('start');
     this._startAction.onMessage = () => { if (!this.isHost) this.onStart?.(); };
+
+    // Канал снапшотов игрока (позиция/поворот/состояние). Пока обычный
+    // Trystero-action (надёжный, упорядоченный); на устойчивость под потерями
+    // (ручной unreliable-канал) заложен шаг 10.
+    this._snapAction = this.room.makeAction('snap');
+    this._snapAction.onMessage = (data, peerId) => this.onSnap?.(data, peerId);
 
     this.room.onPeerJoin = id => {
       this.peerId = id;
@@ -63,6 +71,9 @@ export class Lobby {
   }
 
   sendStart() { this._startAction?.send({ go: 1 }); }
+
+  // Снапшот шлём соседу как есть (компактный массив чисел). В 1v1 — всем пирам.
+  sendSnap(data) { this._snapAction?.send(data); }
 
   _startPing() {
     this._stopPing();
@@ -84,6 +95,8 @@ export class Lobby {
     this.room = null;
     this.peerId = null;
     this.code = null;
+    this._startAction = null;
+    this._snapAction = null;
   }
 }
 

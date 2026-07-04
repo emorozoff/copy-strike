@@ -11,7 +11,9 @@ import { ViewModel, buildProceduralPistol } from './combat/viewmodel.js';
 import { Effects } from './combat/effects.js';
 import { Dummy } from './combat/dummy.js';
 import { MenuFx } from './ui/fx.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { Lobby, makeCode, normalizeCode } from './net/lobby.js';
+import { RemotePlayer, buildProcAvatar, buildModelAvatar } from './net/remote-player.js';
 
 THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
 THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
@@ -23,7 +25,7 @@ const DEBUG = params.has('debug');
 // Версия игры: БАМПИТЬ ПРИ КАЖДОМ ДЕПЛОЕ мелкими шагами (v0.71, v0.72, …);
 // v1.0 — готовая игра. Выводится сверху экрана из JS — по номеру видно,
 // доехало ли обновление или браузер держит старый кэш
-const GAME_VERSION = 'v0.76';
+const GAME_VERSION = 'v0.77';
 
 // Версия ассетов: GitHub Pages кэширует на 10 минут (max-age=600) — без
 // query-параметра после редеплоя браузер подмешивает старые файлы к новым
@@ -214,8 +216,47 @@ function setNetStatus(el, text, cls) {
 
 function startNetGame() {
   audio.init();
+  ensureRemote();
   showUI('game');
   lock.request(); // у гостя может не сработать без жеста — есть клик по канвасу ниже
+}
+
+// --- соперник на карте (шаг 8): снапшоты 20 Гц + интерполяция «на 100 мс назад» ---
+let charGltf = null;          // общая GLB-модель бойца (клонируется под каждого)
+let CHAR_YAW = Math.PI;       // разворот модели лицом к −Z (калибровка скриншотом)
+let CHAR_SCALE = 1;           // масштаб модели (FBX2glTF-размер уточняем скриншотом)
+let CHAR_YOFF = 0;            // сдвиг ног к y=0
+let net = null;               // { remote: RemotePlayer, solo?: bool }
+const NET_SEND_EVERY = 3;     // 60 Гц / 3 = 20 снапшотов/с
+
+function makeAvatar(teamColor) {
+  return charGltf
+    ? buildModelAvatar(charGltf, { scale: CHAR_SCALE, yOffset: CHAR_YOFF, yawOffset: CHAR_YAW, ring: teamColor })
+    : buildProcAvatar(teamColor);
+}
+
+function ensureRemote() {
+  if (net || !lobby.connected) return;
+  // цвет = команда СОПЕРНИКА: хост это CT (синий), гость — T (песочный)
+  const teamColor = lobby.isHost ? 0xc9a24a : 0x5b8fd6;
+  net = { remote: new RemotePlayer(scene, makeAvatar(teamColor)) };
+}
+
+function teardownNet() {
+  if (net) { net.remote.dispose(); net = null; }
+}
+
+function sendNetSnapshot() {
+  const p = player.position;
+  const hs = Math.hypot(player.velocity.x, player.velocity.z);
+  let flags = 0;
+  if (hs > 1.2) flags |= 1;            // движется → анимация бега
+  if (player.crouching) flags |= 2;
+  if (player.onGround) flags |= 4;
+  lobby.sendSnap([
+    +p.x.toFixed(3), +p.y.toFixed(3), +p.z.toFixed(3),
+    +input.yaw.toFixed(4), +input.pitch.toFixed(4), flags,
+  ]);
 }
 
 document.getElementById('btnHost').addEventListener('click', () => {
@@ -259,7 +300,7 @@ btnStartMatch.addEventListener('click', () => {
   startNetGame();
 });
 
-const leaveLobby = () => { lobby.leave(); showUI('menu'); };
+const leaveLobby = () => { lobby.leave(); teardownNet(); showUI('menu'); };
 document.getElementById('btnHostBack').addEventListener('click', leaveLobby);
 document.getElementById('btnJoinBack').addEventListener('click', leaveLobby);
 
@@ -278,8 +319,10 @@ lobby.onPeer = connected => {
     if (connected) setNetStatus(joinStatusEl, 'ПОДКЛЮЧЕНО ✓ — ждём, когда хост начнёт', 'ok');
     else setNetStatus(joinStatusEl, 'соединение потеряно', 'bad');
   }
+  if (!connected) net?.remote.hide(); // соперник ушёл — прячем его модель
 };
 lobby.onStart = () => startNetGame();
+lobby.onSnap = data => { net?.remote.push(data, performance.now()); };
 
 // возврат мыши кликом по канвасу (в т.ч. у гостя после автостарта матча)
 canvas.addEventListener('click', () => {
@@ -564,6 +607,16 @@ async function init() {
     })(),
   ]);
   viewmodel.setActive('ak47');
+
+  // модель бойца для соперника по сети (шаг 8): Quaternius «Character Animated»,
+  // CC0, клипы Idle/Run/Walk/Death. Не критично — при сбое соперник будет
+  // процедурным «человечком» (buildProcAvatar).
+  try {
+    const gltfLoader = new GLTFLoader();
+    charGltf = await withTimeout(new Promise((res, rej) =>
+      gltfLoader.load(av('./assets/player.glb'), res, undefined, rej)), 20_000);
+  } catch { charGltf = null; }
+
   effects = new Effects(scene);
   const dummySpots = [
     [-32, 38, 180],  // 10 м к северу от спавна T, лицом к игроку
@@ -609,7 +662,7 @@ const IDLE_SNAP = { move: { x: 0, y: 0 }, yaw: 0, jump: false, crouch: false, wa
 let stepAcc = 0;
 let wasAirborne = false;
 
-function tick(dt) {
+function tick(dt, tickNo) {
   // без pointer lock (оверлей «ИГРАТЬ» на экране) ввод не игровой —
   // иначе зажатый W уводит персонажа вслепую
   const active = input.pointerLocked || DEBUG || editor.active;
@@ -659,6 +712,9 @@ function tick(dt) {
 
   for (const d of dummies) d.update(dt);
   if (effects) effects.update(dt);
+
+  // сеть: свой снапшот 20 раз/с — соперник у друга интерполирует его на 100 мс назад
+  if (net && !net.solo && lobby.connected && player && tickNo % NET_SEND_EVERY === 0) sendNetSnapshot();
 }
 
 let hudTimer = 0;
@@ -719,6 +775,9 @@ function render(delta, fps, alpha) {
       (editor.active ? '\n[РЕДАКТОР]' : '');
   }
 
+  // соперник интерполируется по времени приёма снапшотов (реальные мс, не тики)
+  if (net) net.remote.update(delta, performance.now());
+
   renderer.clear();
   renderer.render(scene, camera);
   if (viewmodel.ready && !editor.active && worldView) {
@@ -776,6 +835,41 @@ const gameApi = {
   } : null,
   dummies: () => dummies.map(d => ({ hp: d.hp, dead: d.dead, pos: d.group.position.toArray() })),
   punch: () => ({ pitch: +punch.pitch.toFixed(4), yaw: +punch.yaw.toFixed(4) }),
+  // сеть/соперник — для headless-калибровки модели без второй вкладки
+  charLoaded: () => !!charGltf,
+  netInfo: () => net ? {
+    solo: !!net.solo, buffered: net.remote.buffer.length,
+    yawOffset: +net.remote.yawOffset.toFixed(3),
+    visible: net.remote.avatar.group.visible,
+    pos: net.remote.avatar.group.position.toArray().map(v => +v.toFixed(2)),
+  } : null,
+  spawnRemote: color => {
+    if (net) return false;
+    net = { remote: new RemotePlayer(scene, makeAvatar(color ?? 0x5b8fd6)), solo: true };
+    return true;
+  },
+  pushRemote: arr => { net?.remote.push(arr, performance.now()); },
+  killRemote: () => teardownNet(),
+  setCharYaw: deg => { CHAR_YAW = deg * Math.PI / 180; if (net) net.remote.yawOffset = CHAR_YAW; },
+  setCharFit: (scale, yOff) => {
+    if (scale != null) CHAR_SCALE = scale;
+    if (yOff != null) CHAR_YOFF = yOff;
+    if (net) {
+      const root = net.remote.avatar.group.children[0];
+      if (root) { root.scale.setScalar(CHAR_SCALE); root.position.y = CHAR_YOFF; }
+    }
+  },
+  remoteBounds: () => {
+    if (!net) return null;
+    const g = net.remote.avatar.group;
+    const b = new THREE.Box3().setFromObject(g);
+    if (b.isEmpty()) return { empty: true, children: g.children.length };
+    return {
+      min: b.min.toArray().map(v => +v.toFixed(2)), max: b.max.toArray().map(v => +v.toFixed(2)),
+      size: b.getSize(new THREE.Vector3()).toArray().map(v => +v.toFixed(2)),
+      children: g.children.length,
+    };
+  },
 };
 window.__game = gameApi;
 
