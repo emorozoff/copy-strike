@@ -12,6 +12,7 @@ import { Effects } from './combat/effects.js';
 import { Dummy } from './combat/dummy.js';
 import { MenuFx } from './ui/fx.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import { Lobby, makeCode, normalizeCode } from './net/lobby.js';
 import { RemotePlayer, buildProcAvatar, buildModelAvatar, pinRootMotion } from './net/remote-player.js';
 
@@ -25,11 +26,11 @@ const DEBUG = params.has('debug');
 // Версия игры: БАМПИТЬ ПРИ КАЖДОМ ДЕПЛОЕ мелкими шагами (v0.71, v0.72, …);
 // v1.0 — готовая игра. Выводится сверху экрана из JS — по номеру видно,
 // доехало ли обновление или браузер держит старый кэш
-const GAME_VERSION = 'v0.78';
+const GAME_VERSION = 'v0.79';
 
 // Версия ассетов: GitHub Pages кэширует на 10 минут (max-age=600) — без
 // query-параметра после редеплоя браузер подмешивает старые файлы к новым
-const ASSET_V = '6';
+const ASSET_V = '7';
 const av = url => url + '?v=' + ASSET_V;
 
 const canvas = document.getElementById('c');
@@ -754,7 +755,7 @@ async function init() {
   // CC0, клипы Idle/Run/Walk/Death. Не критично — при сбое соперник будет
   // процедурным «человечком» (buildProcAvatar).
   try {
-    const gltfLoader = new GLTFLoader();
+    const gltfLoader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
     charGltf = await withTimeout(new Promise((res, rej) =>
       gltfLoader.load(av('./assets/player.glb'), res, undefined, rej)), 20_000);
     if (charGltf) pinRootMotion(charGltf.animations); // убрать съезжание модели при беге/смерти

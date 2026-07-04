@@ -1,7 +1,11 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { MeshBVH } from 'three-mesh-bvh';
+
+// карта сжата EXT_meshopt_compression — декодер обязателен
+const gltfLoader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
 
 // GoldSrc: 1 юнит = 1 дюйм. Карта в оригинальных юнитах CS 1.6 → метры.
 export const UNIT = 0.0254;
@@ -13,7 +17,7 @@ const DUST2_LONGEST_METERS = 5312 * UNIT;
 
 export async function loadMap(url, onProgress, onBeforeCollider, extraColliders = []) {
   const gltf = await new Promise((resolve, reject) => {
-    new GLTFLoader().load(
+    gltfLoader.load(
       url,
       resolve,
       e => { if (onProgress) onProgress(e.lengthComputable ? e.loaded / e.total : null); },

@@ -1,5 +1,9 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
+
+// общий загрузчик с meshopt-декодером (модели сжаты EXT_meshopt_compression)
+const gltfLoader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
 
 // Оружие от первого лица: отдельная сцена + камера с узким FOV, рендерится
 // вторым проходом поверх мира (clearDepth) — ствол не втыкается в стены.
@@ -54,7 +58,7 @@ export class ViewModel {
   }
 
   async loadWeapon(id, url, opts = {}, onProgress) {
-    const gltf = await new Promise((res, rej) => new GLTFLoader().load(
+    const gltf = await new Promise((res, rej) => gltfLoader.load(
       url, res,
       e => { if (onProgress) onProgress(e.lengthComputable ? e.loaded / e.total : null); },
       rej
