@@ -11,6 +11,7 @@ import { ViewModel, buildProceduralPistol } from './combat/viewmodel.js';
 import { Effects } from './combat/effects.js';
 import { Dummy } from './combat/dummy.js';
 import { MenuFx } from './ui/fx.js';
+import { Lobby, makeCode, normalizeCode } from './net/lobby.js';
 
 THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
 THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
@@ -22,7 +23,7 @@ const DEBUG = params.has('debug');
 // Версия игры: БАМПИТЬ ПРИ КАЖДОМ ДЕПЛОЕ мелкими шагами (v0.71, v0.72, …);
 // v1.0 — готовая игра. Выводится сверху экрана из JS — по номеру видно,
 // доехало ли обновление или браузер держит старый кэш
-const GAME_VERSION = 'v0.75';
+const GAME_VERSION = 'v0.76';
 
 // Версия ассетов: GitHub Pages кэширует на 10 минут (max-age=600) — без
 // query-параметра после редеплоя браузер подмешивает старые файлы к новым
@@ -76,16 +77,20 @@ const fx = new MenuFx(document.getElementById('fx'));
 fx.start();
 let uiState = 'loading';
 let settingsReturn = 'menu'; // откуда открыты настройки
-const PANELS = { loading: loadingEl, menu: menuEl, pause: pauseEl, settings: settingsEl };
+const PANELS = {
+  loading: loadingEl, menu: menuEl, pause: pauseEl, settings: settingsEl,
+  host: document.getElementById('host'), join: document.getElementById('join'),
+};
 
 function showUI(state) {
   uiState = state;
   for (const [name, el] of Object.entries(PANELS)) el.classList.toggle('hidden', name !== state);
   const inGame = state === 'game';
   uiRootEl.classList.toggle('hidden', inGame);
-  // арт-фон с персонажами — в загрузке и меню; в паузе за виньеткой живая игра
+  // арт-фон с персонажами — в загрузке, меню и лобби; в паузе за виньеткой живая игра
   uiRootEl.classList.toggle('art',
-    state === 'loading' || state === 'menu' || (state === 'settings' && settingsReturn === 'menu'));
+    state === 'loading' || state === 'menu' || state === 'host' || state === 'join' ||
+    (state === 'settings' && settingsReturn === 'menu'));
   for (const el of [hudEl, crossEl, ammoEl, hintEl]) el.classList.toggle('hidden', !inGame);
   if (inGame) fx.stop(); else fx.start();
 }
@@ -191,6 +196,95 @@ document.getElementById('btnResume').addEventListener('click', () => {
   lock.request();
 });
 document.getElementById('btnToMenu').addEventListener('click', () => showUI('menu'));
+
+// --- сетевое лобби (фаза 2, шаг «лобби»): комната по коду, старт у хоста ---
+const lobby = new Lobby();
+const roomCodeEl = document.getElementById('roomCode');
+const hostStatusEl = document.getElementById('hostStatus');
+const joinStatusEl = document.getElementById('joinStatus');
+const joinCodeEl = document.getElementById('joinCode');
+const btnStartMatch = document.getElementById('btnStartMatch');
+const startSoonEl = document.getElementById('startSoon');
+const copyLblEl = document.getElementById('copyLbl');
+
+function setNetStatus(el, text, cls) {
+  el.textContent = text;
+  el.className = 'netStatus' + (cls ? ' ' + cls : '');
+}
+
+function startNetGame() {
+  audio.init();
+  showUI('game');
+  lock.request(); // у гостя может не сработать без жеста — есть клик по канвасу ниже
+}
+
+document.getElementById('btnHost').addEventListener('click', () => {
+  const code = makeCode();
+  roomCodeEl.textContent = code;
+  setNetStatus(hostStatusEl, 'ждём друга… передай ему код');
+  btnStartMatch.classList.add('off');
+  startSoonEl.classList.remove('hidden');
+  showUI('host');
+  lobby.join(code, true);
+});
+
+document.getElementById('btnJoin').addEventListener('click', () => {
+  joinCodeEl.value = '';
+  setNetStatus(joinStatusEl, ' ');
+  showUI('join');
+  setTimeout(() => joinCodeEl.focus(), 50);
+});
+
+joinCodeEl.addEventListener('input', () => { joinCodeEl.value = normalizeCode(joinCodeEl.value); });
+joinCodeEl.addEventListener('keydown', e => { if (e.key === 'Enter') document.getElementById('btnJoinGo').click(); });
+
+document.getElementById('btnJoinGo').addEventListener('click', () => {
+  const code = normalizeCode(joinCodeEl.value);
+  if (code.length < 5) { setNetStatus(joinStatusEl, 'код — 5 символов', 'bad'); return; }
+  setNetStatus(joinStatusEl, 'ищем комнату…');
+  lobby.join(code, false);
+});
+
+document.getElementById('btnCopyCode').addEventListener('click', async () => {
+  try {
+    await navigator.clipboard.writeText(lobby.code ?? '');
+    copyLblEl.textContent = 'СКОПИРОВАНО ✓';
+    setTimeout(() => { copyLblEl.textContent = 'СКОПИРОВАТЬ КОД'; }, 1500);
+  } catch { /* буфер обмена недоступен без https/жеста — код можно выделить мышью */ }
+});
+
+btnStartMatch.addEventListener('click', () => {
+  if (!lobby.connected) return;
+  lobby.sendStart();
+  startNetGame();
+});
+
+const leaveLobby = () => { lobby.leave(); showUI('menu'); };
+document.getElementById('btnHostBack').addEventListener('click', leaveLobby);
+document.getElementById('btnJoinBack').addEventListener('click', leaveLobby);
+
+lobby.onPeer = connected => {
+  if (lobby.isHost) {
+    if (connected) {
+      setNetStatus(hostStatusEl, 'ИГРОК ПОДКЛЮЧИЛСЯ ✓', 'ok');
+      btnStartMatch.classList.remove('off');
+      startSoonEl.classList.add('hidden');
+    } else {
+      setNetStatus(hostStatusEl, 'игрок отключился — ждём снова…', 'bad');
+      btnStartMatch.classList.add('off');
+      startSoonEl.classList.remove('hidden');
+    }
+  } else {
+    if (connected) setNetStatus(joinStatusEl, 'ПОДКЛЮЧЕНО ✓ — ждём, когда хост начнёт', 'ok');
+    else setNetStatus(joinStatusEl, 'соединение потеряно', 'bad');
+  }
+};
+lobby.onStart = () => startNetGame();
+
+// возврат мыши кликом по канвасу (в т.ч. у гостя после автостарта матча)
+canvas.addEventListener('click', () => {
+  if (uiState === 'game' && !input.pointerLocked) { audio.init(); lock.request(); }
+});
 document.getElementById('btnSettings').addEventListener('click', () => { settingsReturn = 'menu'; showUI('settings'); });
 document.getElementById('btnPauseSettings').addEventListener('click', () => { settingsReturn = 'pause'; showUI('settings'); });
 document.getElementById('btnBack').addEventListener('click', () => showUI(settingsReturn));
@@ -621,6 +715,7 @@ function render(delta, fps, alpha) {
       `fps ${fps}\n` +
       `поз ${p.x.toFixed(1)} ${p.y.toFixed(1)} ${p.z.toFixed(1)}\n` +
       `скор ${hspeed.toFixed(1)} м/с${player.onGround ? ' · земля' : ''}${player.crouching ? ' · присед' : ''}` +
+      (lobby.connected ? `\nпинг ${lobby.rtt ?? '…'} мс` : '') +
       (editor.active ? '\n[РЕДАКТОР]' : '');
   }
 

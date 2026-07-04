@@ -17,6 +17,7 @@ export class Input {
 
     window.addEventListener('keydown', e => {
       if (e.metaKey) return; // Cmd-комбинации (копирование и т.п.) — не игровой ввод
+      if (e.target instanceof HTMLInputElement) return; // набор кода комнаты — не игровой ввод
       if (e.repeat) { if (GAME_KEYS.has(e.code)) e.preventDefault(); return; }
       this.keys.add(e.code);
       if (GAME_KEYS.has(e.code)) e.preventDefault();

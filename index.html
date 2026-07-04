@@ -101,6 +101,20 @@
   .ldTip .i{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;
     border:1px solid #8f8a7a;color:#d8a13a;font-size:12px;font-weight:700;font-style:normal}
 
+  /* ---------- лобби ---------- */
+  .netBox{display:flex;flex-direction:column;align-items:center;gap:14px;margin-bottom:34px}
+  .netLbl{font-size:12px;letter-spacing:.25em;color:#9a9483;text-shadow:0 1px 2px #000}
+  .roomCode{font-size:clamp(40px,6vw,64px);font-weight:700;letter-spacing:.35em;color:#f0c14b;
+    text-shadow:0 2px 0 #000,0 0 30px rgba(216,161,58,.35);padding-left:.35em;user-select:all}
+  .codeInput{width:min(340px,70vw);height:62px;text-align:center;font-family:inherit;font-size:34px;font-weight:700;
+    letter-spacing:.3em;color:#f0c14b;text-transform:uppercase;caret-color:#f0c14b;
+    background:linear-gradient(178deg,#2b2823,#191713);border:1px solid #0a0908;border-radius:7px;
+    box-shadow:inset 0 2px 8px rgba(0,0,0,.7), 0 0 0 1px #3a382f;outline:none}
+  .codeInput:focus{box-shadow:inset 0 2px 8px rgba(0,0,0,.7), 0 0 0 1px rgba(216,161,58,.6)}
+  .netStatus{min-height:20px;font-size:14px;color:#c9c2ab;text-shadow:0 1px 2px #000;letter-spacing:.06em}
+  .netStatus.ok{color:#7fda6a}
+  .netStatus.bad{color:#ff7b66}
+
   /* ---------- настройки ---------- */
   .setBox{width:min(520px,84vw);display:flex;flex-direction:column;gap:26px;margin-bottom:34px}
   .setRow{display:flex;flex-direction:column;gap:10px}
@@ -151,17 +165,15 @@
         <span class="ico"><svg viewBox="0 0 24 24"><path d="M7 4.5v15l13-7.5z"/></svg></span>
         <span class="lbl">ТРЕНИРОВКА</span>
       </button>
-      <button class="mbtn off" id="btnHost">
+      <button class="mbtn" id="btnHost">
         <span class="edge"></span>
         <span class="ico"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.4"/><path d="M2.5 19c.6-3.6 3.2-5.6 6.5-5.6S14.9 15.4 15.5 19z"/><path d="M18 7.2h2.2V5h1.8v2.2H24V9h-2v2.2h-1.8V9H18z"/></svg></span>
         <span class="lbl">СОЗДАТЬ ИГРУ</span>
-        <span class="soon">СКОРО</span>
       </button>
-      <button class="mbtn off" id="btnJoin">
+      <button class="mbtn" id="btnJoin">
         <span class="edge"></span>
         <span class="ico"><svg viewBox="0 0 24 24"><circle cx="8" cy="8" r="3.2"/><circle cx="16.5" cy="9" r="2.6"/><path d="M1.8 19c.5-3.4 3-5.3 6.2-5.3s5.7 1.9 6.2 5.3z"/><path d="M15.1 13.9c2.9.1 5 1.8 5.5 5.1h-4.4c-.2-2-.9-3.8-1.1-5.1z"/></svg></span>
         <span class="lbl">ПОДКЛЮЧИТЬСЯ К ИГРЕ</span>
-        <span class="soon">СКОРО</span>
       </button>
       <button class="mbtn" id="btnSettings">
         <span class="edge"></span>
@@ -190,6 +202,54 @@
         <span class="edge"></span>
         <span class="ico"><svg viewBox="0 0 24 24"><path d="M10 4H4v16h6v-2H6V6h4zM13 7l-1.4 1.4L14.2 11H8v2h6.2l-2.6 2.6L13 17l5-5z"/></svg></span>
         <span class="lbl">ВЫЙТИ В МЕНЮ</span>
+      </button>
+    </div>
+  </div>
+
+  <div id="host" class="panel hidden">
+    <h1 class="logo">СОЗДАТЬ ИГРУ</h1>
+    <div class="netBox">
+      <div class="netLbl">КОД КОМНАТЫ — ПЕРЕДАЙ ДРУГУ</div>
+      <div id="roomCode" class="roomCode">•••••</div>
+      <div id="hostStatus" class="netStatus">создаём комнату…</div>
+    </div>
+    <div class="btns">
+      <button class="mbtn" id="btnCopyCode">
+        <span class="edge"></span>
+        <span class="ico"><svg viewBox="0 0 24 24"><path d="M8 3h11v14h-3v3H5V6h3zm2 2v10h7V5zm-3 3H7v10h7v-1h-5z"/></svg></span>
+        <span class="lbl" id="copyLbl">СКОПИРОВАТЬ КОД</span>
+      </button>
+      <button class="mbtn off" id="btnStartMatch">
+        <span class="edge"></span>
+        <span class="ico"><svg viewBox="0 0 24 24"><path d="M7 4.5v15l13-7.5z"/></svg></span>
+        <span class="lbl">В БОЙ</span>
+        <span class="soon" id="startSoon">ЖДЁМ ИГРОКА</span>
+      </button>
+      <button class="mbtn" id="btnHostBack">
+        <span class="edge"></span>
+        <span class="ico"><svg viewBox="0 0 24 24"><path d="M11 5l-7 7 7 7 1.4-1.4L7.8 13H20v-2H7.8l4.6-4.6z"/></svg></span>
+        <span class="lbl">НАЗАД</span>
+      </button>
+    </div>
+  </div>
+
+  <div id="join" class="panel hidden">
+    <h1 class="logo">ПОДКЛЮЧИТЬСЯ</h1>
+    <div class="netBox">
+      <div class="netLbl">ВВЕДИ КОД КОМНАТЫ</div>
+      <input id="joinCode" class="codeInput" maxlength="5" autocomplete="off" spellcheck="false" placeholder="•••••">
+      <div id="joinStatus" class="netStatus"> </div>
+    </div>
+    <div class="btns">
+      <button class="mbtn" id="btnJoinGo">
+        <span class="edge"></span>
+        <span class="ico"><svg viewBox="0 0 24 24"><path d="M13 7l-1.4 1.4 2.6 2.6H4v2h10.2l-2.6 2.6L13 17l5-5zM19 4h-6v2h6v12h-6v2h8V4z"/></svg></span>
+        <span class="lbl">ПОДКЛЮЧИТЬСЯ</span>
+      </button>
+      <button class="mbtn" id="btnJoinBack">
+        <span class="edge"></span>
+        <span class="ico"><svg viewBox="0 0 24 24"><path d="M11 5l-7 7 7 7 1.4-1.4L7.8 13H20v-2H7.8l4.6-4.6z"/></svg></span>
+        <span class="lbl">НАЗАД</span>
       </button>
     </div>
   </div>
