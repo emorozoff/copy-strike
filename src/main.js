@@ -9,7 +9,7 @@ import { PointEditor } from './dev/editor.js';
 import { WEAPONS, Gun, currentSpread, shotDirection, computeDamage } from './combat/weapons.js';
 import { ViewModel, buildProceduralPistol } from './combat/viewmodel.js';
 import { Effects } from './combat/effects.js';
-import { Dummy } from './combat/dummy.js';
+import { Dummy, ModelDummy } from './combat/dummy.js';
 import { MenuFx } from './ui/fx.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
@@ -26,7 +26,7 @@ const DEBUG = params.has('debug');
 // Версия игры: БАМПИТЬ ПРИ КАЖДОМ ДЕПЛОЕ мелкими шагами (v0.71, v0.72, …);
 // v1.0 — готовая игра. Выводится сверху экрана из JS — по номеру видно,
 // доехало ли обновление или браузер держит старый кэш
-const GAME_VERSION = 'v0.79';
+const GAME_VERSION = 'v0.80';
 
 // Версия ассетов: GitHub Pages кэширует на 10 минут (max-age=600) — без
 // query-параметра после редеплоя браузер подмешивает старые файлы к новым
@@ -193,6 +193,7 @@ const lock = setupPointerLock(canvas, input, {
 
 document.getElementById('btnTrain').addEventListener('click', () => {
   audio.init();
+  spawnTrainingDummies(); // вернуть мишени, если их убрал прошлый сетевой матч
   showUI('game');
   lock.request();
 });
@@ -245,6 +246,7 @@ function ensureRemote() {
   // цвет = команда СОПЕРНИКА: хост это CT (синий), гость — T (песочный)
   const teamColor = lobby.isHost ? 0xc9a24a : 0x5b8fd6;
   net = { remote: new RemotePlayer(scene, makeAvatar(teamColor)) };
+  clearDummies(); // в сетевом 1-на-1 тренировочные мишени убираем
   frags = 0; deaths = 0;
   resetCombat();
 }
@@ -373,6 +375,24 @@ function updateCorpses(dt) {
 function clearCorpses() {
   for (const c of corpses) { scene.remove(c.avatar.group); c.avatar.dispose(); }
   corpses.length = 0;
+}
+
+// --- тренировочные мишени: 5 бойцов-моделей у спавна T ---
+function spawnTrainingDummies() {
+  if (dummies.length) return;
+  const sx = -31, sz = 48;            // центр спавна T
+  for (const dx of [-6, -3, 0, 3, 6]) {
+    const x = sx + dx, z = sz - 10;   // ряд в 10 м перед спавном
+    const y = findFloor(player.collider, x, z, mapBounds.max.y + 5);
+    if (y === null) continue;
+    const facing = Math.atan2(sx - x, sz - z); // лицом к спавну (к игроку)
+    if (charGltf) dummies.push(new ModelDummy(scene, charGltf, x, y + 0.02, z, facing, { scale: CHAR_SCALE, yOffset: CHAR_YOFF }));
+    else dummies.push(new Dummy(scene, x, y, z, facing * 180 / Math.PI)); // запас, если модель не загрузилась
+  }
+}
+function clearDummies() {
+  for (const d of dummies) { if (d.dispose) d.dispose(); else scene.remove(d.group); }
+  dummies.length = 0;
 }
 
 function localDie() {
@@ -762,15 +782,7 @@ async function init() {
   } catch { charGltf = null; }
 
   effects = new Effects(scene);
-  const dummySpots = [
-    [-32, 38, 180],  // 10 м к северу от спавна T, лицом к игроку
-    [0, -6, 180],    // мид
-    [14, -32, 0],    // двор CT
-  ];
-  for (const [x, z, yawDeg] of dummySpots) {
-    const y = findFloor(map.collider, x, z, mapBounds.max.y + 5);
-    if (y !== null) dummies.push(new Dummy(scene, x, y, z, yawDeg));
-  }
+  spawnTrainingDummies(); // 5 бойцов-мишеней у спавна T (для тренировки)
   updateAmmoHud();
   updateHpHud();
 
