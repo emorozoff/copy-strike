@@ -22,7 +22,7 @@ const DEBUG = params.has('debug');
 // Версия игры: БАМПИТЬ ПРИ КАЖДОМ ДЕПЛОЕ мелкими шагами (v0.71, v0.72, …);
 // v1.0 — готовая игра. Выводится сверху экрана из JS — по номеру видно,
 // доехало ли обновление или браузер держит старый кэш
-const GAME_VERSION = 'v0.74';
+const GAME_VERSION = 'v0.75';
 
 // Версия ассетов: GitHub Pages кэширует на 10 минут (max-age=600) — без
 // query-параметра после редеплоя браузер подмешивает старые файлы к новым
@@ -83,10 +83,18 @@ function showUI(state) {
   for (const [name, el] of Object.entries(PANELS)) el.classList.toggle('hidden', name !== state);
   const inGame = state === 'game';
   uiRootEl.classList.toggle('hidden', inGame);
-  uiRootEl.classList.toggle('dark', state === 'loading');
+  // арт-фон с персонажами — в загрузке и меню; в паузе за виньеткой живая игра
+  uiRootEl.classList.toggle('art',
+    state === 'loading' || state === 'menu' || (state === 'settings' && settingsReturn === 'menu'));
   for (const el of [hudEl, crossEl, ammoEl, hintEl]) el.classList.toggle('hidden', !inGame);
   if (inGame) fx.stop(); else fx.start();
 }
+
+// лёгкий параллакс персонажей за мышью
+addEventListener('mousemove', e => {
+  uiRootEl.style.setProperty('--pax', (((e.clientX / innerWidth) * 2 - 1) * -10).toFixed(1) + 'px');
+  uiRootEl.style.setProperty('--pay', (((e.clientY / innerHeight) * 2 - 1) * -6).toFixed(1) + 'px');
+});
 
 // --- настройки: чувствительность и громкость, живут в localStorage ---
 const sensRange = document.getElementById('sensRange');

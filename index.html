@@ -35,13 +35,22 @@
      номер выставляет main.js — если наверху старый номер, JS загрузился из кэша */
   #ver{position:fixed;top:8px;left:50%;transform:translateX(-50%);font-size:12px;color:#d8a13a;letter-spacing:.15em;z-index:30;text-shadow:0 1px 2px #000}
 
-  /* ---------- общий слой меню: виньетка + частицы ---------- */
+  /* ---------- общий слой меню: арт-фон + частицы + персонажи + виньетка ---------- */
   #uiRoot{position:fixed;inset:0;z-index:10}
   #uiRoot .vig{position:absolute;inset:0;background:
     radial-gradient(ellipse at 50% 42%, rgba(8,8,10,.25) 0%, rgba(8,8,10,.62) 62%, rgba(5,5,7,.9) 100%)}
-  #uiRoot.dark .vig{background:
-    radial-gradient(ellipse at 50% 40%, #23201a 0%, #14120e 55%, #0a0908 100%)}
   #fx{position:absolute;inset:0;width:100%;height:100%}
+  /* фон-арт и персонажи видны в меню/загрузке (класс art); в паузе — живая игра */
+  #bgArt{position:absolute;inset:0;background:#14120e center/cover no-repeat;display:none}
+  #uiRoot.art #bgArt{display:block;background-image:url('assets/ui/menu-bg.webp')}
+  #charsWrap{position:absolute;inset:0;pointer-events:none;display:none;
+    transform:translate(var(--pax,0px),var(--pay,0px));transition:transform .2s ease-out}
+  #uiRoot.art #charsWrap{display:block}
+  .char{position:absolute;bottom:-2vh;height:min(80vh,820px);
+    filter:drop-shadow(0 10px 24px rgba(0,0,0,.55))}
+  #charT{left:-1vw;animation:breathe 6.5s ease-in-out infinite alternate}
+  #charCT{right:-1vw;animation:breathe 7.5s ease-in-out infinite alternate -3s}
+  @keyframes breathe{from{transform:translateY(0) scale(1)}to{transform:translateY(9px) scale(1.012)}}
 
   .panel{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:0}
 
@@ -118,10 +127,15 @@
 <div id="hint" class="hidden">фаза 1 · <a href="net-test.html" style="color:#8f8a7a">сетевой тест</a></div>
 <div id="editorPanel" class="hidden"></div>
 
-<!-- общий фон меню: виньетка + канвас частиц (пыль/дым/лучи) -->
-<div id="uiRoot" class="dark">
-  <div class="vig"></div>
+<!-- общий фон меню: арт → частицы (пыль/дым/лучи) → персонажи → виньетка -->
+<div id="uiRoot" class="art">
+  <div id="bgArt"></div>
   <canvas id="fx"></canvas>
+  <div id="charsWrap">
+    <img id="charT" class="char" src="assets/ui/char-t.webp" alt="">
+    <img id="charCT" class="char" src="assets/ui/char-ct.webp" alt="">
+  </div>
+  <div class="vig"></div>
 
   <div id="loading" class="panel">
     <h1 class="ldTitle">ЗАГРУЗКА</h1>
