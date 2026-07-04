@@ -27,7 +27,9 @@ export const WEAPONS = {
     reloadTime: 2.43, deployTime: 1.0,
     headMult: 4, legMult: 0.75,
     rangeModifier: 0.98, rangeUnit: 12.7,
-    baseSpread: 0.0018, sprayGrowth: 0.0011, movePenalty: 7, airPenalty: 0.025, crouchBonus: 0.6,
+    // разброс перетюнен 2026-07-04 (фидбек: «стрельба на бегу должна наказываться»):
+    // стоя одиночными — точно; на полном бегу конус ×13; в прыжке — лотерея
+    baseSpread: 0.0018, sprayGrowth: 0.0014, movePenalty: 12, airPenalty: 0.045, crouchBonus: 0.6,
     kick: AK_KICK,
     sounds: { fire: ['ak_shot'], dry: 'dryfire', deploy: 'ak_boltpull' },
     reloadSounds: [[0.45, 'ak_clipout'], [1.4, 'ak_clipin'], [2.05, 'ak_boltpull']],
@@ -62,7 +64,7 @@ export const WEAPONS = {
     semiAuto: true,
     headMult: 4, legMult: 0.75,
     rangeModifier: 0.75, rangeUnit: 12.7,
-    baseSpread: 0.0024, sprayGrowth: 0.002, movePenalty: 4, airPenalty: 0.03, crouchBonus: 0.7,
+    baseSpread: 0.0024, sprayGrowth: 0.002, movePenalty: 7, airPenalty: 0.05, crouchBonus: 0.7,
     kick: GLOCK_KICK,
     sounds: { fire: ['glock_shot'], dry: 'dryfire_pistol', deploy: 'glock_sliderelease' },
     reloadSounds: [[0.5, 'glock_clipout'], [1.2, 'glock_clipin'], [1.75, 'glock_slideback']],

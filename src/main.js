@@ -22,7 +22,7 @@ const DEBUG = params.has('debug');
 // Версия игры: БАМПИТЬ ПРИ КАЖДОМ ДЕПЛОЕ мелкими шагами (v0.71, v0.72, …);
 // v1.0 — готовая игра. Выводится сверху экрана из JS — по номеру видно,
 // доехало ли обновление или браузер держит старый кэш
-const GAME_VERSION = 'v0.73';
+const GAME_VERSION = 'v0.74';
 
 // Версия ассетов: GitHub Pages кэширует на 10 минут (max-age=600) — без
 // query-параметра после редеплоя браузер подмешивает старые файлы к новым
@@ -560,6 +560,7 @@ function tick(dt) {
 }
 
 let hudTimer = 0;
+let crossGap = 4; // текущий раствор прицела, px (сглаживается к цели)
 let menuT = Math.random() * 200; // фаза облёта карты в меню
 const camPos = new THREE.Vector3();
 function render(delta, fps, alpha) {
@@ -589,6 +590,18 @@ function render(delta, fps, alpha) {
       THREE.MathUtils.clamp(input.pitch + punch.pitch, -PITCH_LIM, PITCH_LIM),
       input.yaw + punch.yaw, 0
     );
+  }
+
+  // динамический прицел: штрихи расходятся по текущему разбросу
+  // (бег/воздух/присед/очередь), перевод радиан в пиксели через FOV камеры
+  if (uiState === 'game' && player) {
+    const gun = activeGun();
+    const hspeed = Math.hypot(player.velocity.x, player.velocity.z);
+    const spread = currentSpread(gun.def, { hspeed, onGround: player.onGround, crouching: player.crouching },
+      gun.firingRecently ? gun.burstIdx : 0);
+    const px = spread * (innerHeight / 2) / Math.tan(camera.fov / 2 * D2R);
+    crossGap = THREE.MathUtils.damp(crossGap, Math.min(60, 4 + px), 18, delta);
+    crossEl.style.setProperty('--gap', crossGap.toFixed(1) + 'px');
   }
 
   hudTimer += delta;

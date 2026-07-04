@@ -11,7 +11,15 @@
 
   /* ---------- игровой HUD ---------- */
   #hud{position:fixed;top:10px;left:12px;font-size:12px;line-height:1.5;white-space:pre;z-index:5;text-shadow:0 1px 2px #000}
-  #cross{position:fixed;left:50%;top:50%;width:4px;height:4px;margin:-2px 0 0 -2px;background:#7fda6a;border-radius:50%;z-index:5;box-shadow:0 0 2px #000}
+  /* динамический прицел: 4 штриха расходятся по текущему разбросу */
+  #cross{position:fixed;left:50%;top:50%;width:0;height:0;z-index:5}
+  #cross i{position:absolute;background:#7fda6a;box-shadow:0 0 0 1px rgba(0,0,0,.65)}
+  #cross .t,#cross .b{width:2px;height:9px;left:-1px}
+  #cross .l,#cross .r{width:9px;height:2px;top:-1px}
+  #cross .t{bottom:var(--gap)}
+  #cross .b{top:var(--gap)}
+  #cross .l{right:var(--gap)}
+  #cross .r{left:var(--gap)}
   #hint{position:fixed;bottom:10px;left:12px;font-size:11px;color:#8f8a7a;z-index:5;text-shadow:0 1px 2px #000}
   #ammo{position:fixed;bottom:14px;right:18px;font-size:26px;color:#e8e2d0;z-index:5;text-shadow:0 2px 3px #000;letter-spacing:.05em}
   #ammo span{font-size:15px;color:#9a9483}
@@ -104,7 +112,7 @@
 <canvas id="c"></canvas>
 <div id="ver">v?</div>
 <div id="hud" class="hidden"></div>
-<div id="cross" class="hidden"></div>
+<div id="cross" class="hidden" style="--gap:4px"><i class="t"></i><i class="b"></i><i class="l"></i><i class="r"></i></div>
 <div id="hitmark"></div>
 <div id="ammo" class="hidden"></div>
 <div id="hint" class="hidden">фаза 1 · <a href="net-test.html" style="color:#8f8a7a">сетевой тест</a></div>
