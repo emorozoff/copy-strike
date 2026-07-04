@@ -23,15 +23,47 @@ export class RemotePlayer {
     this.yawOffset = avatar.yawOffset ?? 0;
     this.buffer = [];             // { t, x, y, z, yaw, pitch, flags }
     this._state = { moving: false, crouching: false, onGround: true, dead: false };
+
+    // Невидимые хитбоксы (ноги/торс/голова) — по ним стрелок делает рейкаст.
+    // material.visible=false убирает отрисовку, но object.visible остаётся true,
+    // поэтому рейкаст их видит. Едут вместе с интерполированной моделью (дети group).
+    const hbMat = new THREE.MeshBasicMaterial({ visible: false });
+    this._hbMat = hbMat;
+    const hb = (geo, y, part) => {
+      const m = new THREE.Mesh(geo, hbMat);
+      m.position.y = y;
+      m.frustumCulled = false;
+      m.userData.part = part;
+      m.userData.remote = true;
+      avatar.group.add(m);
+      return m;
+    };
+    this.hitboxes = [
+      hb(new THREE.BoxGeometry(0.42, 0.9, 0.32), 0.45, 'legs'),
+      hb(new THREE.BoxGeometry(0.52, 0.66, 0.34), 1.22, 'torso'),
+      hb(new THREE.SphereGeometry(0.17, 10, 8), 1.70, 'head'),
+    ];
+
     avatar.group.visible = false;
     scene.add(avatar.group);
   }
+
+  get dead() { return this._state.dead; }
+  // можно ли попасть: соперник виден на карте и ещё жив
+  get canBeHit() { return this.avatar.group.visible && !this._state.dead; }
 
   hide() { this.avatar.group.visible = false; }
 
   // arr — снапшот от соперника; nowMs — локальное время приёма (performance.now)
   push(arr, nowMs) {
     if (!Array.isArray(arr) || arr.length < 6) return;
+    // Большой скачок позиции (респавн-телепорт) нельзя интерполировать — иначе
+    // враг «проезжает» через карту за 100 мс. Чистим буфер → мгновенный снап.
+    const last = this.buffer[this.buffer.length - 1];
+    if (last) {
+      const dx = arr[0] - last.x, dy = arr[1] - last.y, dz = arr[2] - last.z;
+      if (dx * dx + dy * dy + dz * dz > 16) this.buffer.length = 0; // > 4 м за снапшот
+    }
     this.buffer.push({ t: nowMs, x: arr[0], y: arr[1], z: arr[2], yaw: arr[3], pitch: arr[4], flags: arr[5] | 0 });
     if (this.buffer.length > MAX_BUFFER) this.buffer.shift();
     this.avatar.group.visible = true;
@@ -63,6 +95,8 @@ export class RemotePlayer {
   }
 
   dispose() {
+    for (const h of this.hitboxes) h.geometry.dispose();
+    this._hbMat.dispose();
     this.scene.remove(this.avatar.group);
     this.avatar.dispose();
   }
@@ -170,6 +204,24 @@ export function buildProcAvatar(teamColor = 0x9aa0a6) {
   };
 }
 
+// Убираем «root motion»: клипы Quaternius несут горизонтальное смещение таза
+// (нода «Body») — при беге/смерти модель уезжает от своей сетевой позиции.
+// Позицию в мире задаёт снапшот, поэтому горизонталь таза фиксируем на старте
+// клипа, вертикаль (подпрыгивание/дыхание) оставляем. Мутируем клипы один раз.
+export function pinRootMotion(clips) {
+  for (const clip of clips) {
+    if (clip.userData?.pinned) continue;
+    for (const track of clip.tracks) {
+      if (track.name.endsWith('Body.position')) {
+        const v = track.values; // [x,y,z, x,y,z, …]
+        const x0 = v[0], z0 = v[2];
+        for (let i = 0; i < v.length; i += 3) { v[i] = x0; v[i + 2] = z0; }
+      }
+    }
+    clip.userData = { ...(clip.userData || {}), pinned: true };
+  }
+}
+
 // --- аватар из анимированной GLB (drop-in, когда появится модель) --------------
 // gltf — результат GLTFLoader; opts.height задаёт рост (авто-масштаб), opts.yawOffset
 // разворачивает модель лицом к −Z, opts.ring — цвет команды под ногами.
@@ -210,16 +262,19 @@ export function buildModelAvatar(gltf, opts = {}) {
   const deathClip = exact('death') ?? loose(/death|die|dead/i) ?? null;
 
   const actions = {};
-  const mkAction = clip => {
+  const mkAction = (clip, autoplay = true) => {
     if (!clip) return null;
     const a = mixer.clipAction(clip);
-    a.enabled = true; a.setEffectiveWeight(1); a.play();
-    a.setEffectiveWeight(0);
+    a.enabled = true;
+    if (autoplay) { a.setEffectiveWeight(1); a.play(); a.setEffectiveWeight(0); }
     return a;
   };
   actions.idle = mkAction(idleClip);
   actions.run = mkAction(runClip);
-  actions.death = mkAction(deathClip);
+  // death НЕ играем на старте: LoopOnce-клип успел бы «доиграться» в нулевом
+  // весе и застрять клампом — тогда при триггере он не воспроизводится.
+  // Заводим его свежим при входе в смерть (fadeTo → reset+play).
+  actions.death = mkAction(deathClip, false);
   if (actions.death) { actions.death.setLoop(THREE.LoopOnce, 1); actions.death.clampWhenFinished = true; }
 
   let current = actions.idle;

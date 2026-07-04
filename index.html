@@ -30,6 +30,15 @@
   #hitmark::after{transform:translate(-50%,-50%) rotate(-45deg)}
   #hitmark.head::before,#hitmark.head::after{background:#ff5b45}
   #hitmark.show{opacity:.9}
+  #hp{position:fixed;bottom:14px;left:18px;font-size:26px;color:#e8e2d0;z-index:5;text-shadow:0 2px 3px #000;letter-spacing:.05em}
+  #hp b{font-weight:400}
+  #hp span{font-size:15px;color:#9a9483}
+  #hp.low{color:#e05a45}
+  #killfeed{position:fixed;top:34px;right:14px;z-index:6;display:flex;flex-direction:column;gap:4px;align-items:flex-end;pointer-events:none}
+  #killfeed div{background:rgba(20,18,14,.62);color:#e8e2d0;font-size:13px;padding:3px 9px;border-radius:3px;text-shadow:0 1px 2px #000}
+  #hurt{position:fixed;inset:0;z-index:4;pointer-events:none;opacity:0;box-shadow:inset 0 0 120px 34px rgba(200,20,10,.72);transition:opacity .12s}
+  #hurt.show{opacity:1}
+  #deadmsg{position:fixed;left:0;right:0;top:42%;text-align:center;z-index:7;color:#e8e2d0;font-size:27px;letter-spacing:.08em;text-shadow:0 2px 6px #000;pointer-events:none}
   #editorPanel{position:fixed;top:10px;right:12px;font-size:11px;color:#d8a13a;text-align:right;white-space:pre;z-index:5;text-shadow:0 1px 2px #000}
   /* версия поверх всего (z-index выше оверлеев): видна и на загрузке, и в игре;
      номер выставляет main.js — если наверху старый номер, JS загрузился из кэша */
@@ -138,6 +147,10 @@
 <div id="cross" class="hidden" style="--gap:4px"><i class="t"></i><i class="b"></i><i class="l"></i><i class="r"></i></div>
 <div id="hitmark"></div>
 <div id="ammo" class="hidden"></div>
+<div id="hp" class="hidden"></div>
+<div id="killfeed"></div>
+<div id="hurt"></div>
+<div id="deadmsg" class="hidden"></div>
 <div id="hint" class="hidden">фаза 1 · <a href="net-test.html" style="color:#8f8a7a">сетевой тест</a></div>
 <div id="editorPanel" class="hidden"></div>
 

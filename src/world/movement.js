@@ -96,6 +96,31 @@ export class PlayerController {
     return !blocked;
   }
 
+  // Помещается ли стоячая капсула ногами в точке (x,y,z) — для отбора точек
+  // респавна (тот же shapecast, что и canStand, но в произвольном месте).
+  fitsAt(x, y, z) {
+    const M = MOVE;
+    tmpSeg.start.set(x, y + M.radius + 0.02, z);
+    tmpSeg.end.set(x, y + M.standHeight - M.radius, z);
+    tmpMat.copy(this.collider.matrixWorld).invert();
+    tmpSeg.start.applyMatrix4(tmpMat);
+    tmpSeg.end.applyMatrix4(tmpMat);
+    tmpBox.makeEmpty();
+    tmpBox.expandByPoint(tmpSeg.start);
+    tmpBox.expandByPoint(tmpSeg.end);
+    tmpBox.min.addScalar(-M.radius);
+    tmpBox.max.addScalar(M.radius);
+    let blocked = false;
+    this.collider.geometry.boundsTree.shapecast({
+      intersectsBounds: box => box.intersectsBox(tmpBox),
+      intersectsTriangle: tri => {
+        if (tri.closestPointToSegment(tmpSeg, triPoint, capPoint) < M.radius - 0.01) { blocked = true; return true; }
+        return false;
+      },
+    });
+    return !blocked;
+  }
+
   update(dt, input) {
     this.prevPosition.copy(this.position);
     const sub = dt / MOVE.physicsSubsteps;

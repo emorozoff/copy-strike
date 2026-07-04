@@ -6,9 +6,10 @@
 ## Модели
 
 - **Боец (соперник по сети)** — `assets/player.glb`
-  «Character Animated» by **Quaternius** (quaternius.com), **CC0 / Public Domain**.
-  Источник: https://poly.pizza/m/DgOCW9ZCRJ . Клипы Idle/Walk/Run/Death и др.
-  Атрибуция не обязательна; указываем из уважения.
+  «Character Soldier» by **Quaternius** (quaternius.com), **CC0 / Public Domain**.
+  Источник: https://poly.pizza/m/PpLF4rt4ah . Милитари-боец с каской и винтовкой;
+  клипы Idle/Run/Run_Gun/Death/Duck. Атрибуция не обязательна; указываем из уважения.
+  (Ранее использовалась их же «Character Animated» — заменена на более «боевой» вид.)
 
 - **Glock-18 + руки (viewmodel)** — `assets/glock.glb`
   «Fps Rig» by **J-Toastie** через Poly Pizza, **CC-BY** — авторство обязательно.

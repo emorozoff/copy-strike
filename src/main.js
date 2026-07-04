@@ -13,7 +13,7 @@ import { Dummy } from './combat/dummy.js';
 import { MenuFx } from './ui/fx.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { Lobby, makeCode, normalizeCode } from './net/lobby.js';
-import { RemotePlayer, buildProcAvatar, buildModelAvatar } from './net/remote-player.js';
+import { RemotePlayer, buildProcAvatar, buildModelAvatar, pinRootMotion } from './net/remote-player.js';
 
 THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
 THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
@@ -25,11 +25,11 @@ const DEBUG = params.has('debug');
 // Версия игры: БАМПИТЬ ПРИ КАЖДОМ ДЕПЛОЕ мелкими шагами (v0.71, v0.72, …);
 // v1.0 — готовая игра. Выводится сверху экрана из JS — по номеру видно,
 // доехало ли обновление или браузер держит старый кэш
-const GAME_VERSION = 'v0.77';
+const GAME_VERSION = 'v0.78';
 
 // Версия ассетов: GitHub Pages кэширует на 10 минут (max-age=600) — без
 // query-параметра после редеплоя браузер подмешивает старые файлы к новым
-const ASSET_V = '5';
+const ASSET_V = '6';
 const av = url => url + '?v=' + ASSET_V;
 
 const canvas = document.getElementById('c');
@@ -47,6 +47,10 @@ const settingsEl = document.getElementById('settings');
 const ldFillEl = document.getElementById('ldFill');
 const ldPctEl = document.getElementById('ldPct');
 const loadNoteEl = document.getElementById('loadNote');
+const hpEl = document.getElementById('hp');
+const killfeedEl = document.getElementById('killfeed');
+const hurtEl = document.getElementById('hurt');
+const deadmsgEl = document.getElementById('deadmsg');
 
 document.getElementById('ver').textContent = 'COPY-STRIKE ' + GAME_VERSION;
 document.title = 'COPY-STRIKE ' + GAME_VERSION;
@@ -93,7 +97,7 @@ function showUI(state) {
   uiRootEl.classList.toggle('art',
     state === 'loading' || state === 'menu' || state === 'host' || state === 'join' ||
     (state === 'settings' && settingsReturn === 'menu'));
-  for (const el of [hudEl, crossEl, ammoEl, hintEl]) el.classList.toggle('hidden', !inGame);
+  for (const el of [hudEl, crossEl, ammoEl, hpEl]) el.classList.toggle('hidden', !inGame);
   if (inGame) fx.stop(); else fx.start();
 }
 
@@ -224,7 +228,7 @@ function startNetGame() {
 // --- соперник на карте (шаг 8): снапшоты 20 Гц + интерполяция «на 100 мс назад» ---
 let charGltf = null;          // общая GLB-модель бойца (клонируется под каждого)
 let CHAR_YAW = Math.PI;       // разворот модели лицом к −Z (калибровка скриншотом)
-let CHAR_SCALE = 1;           // масштаб модели (FBX2glTF-размер уточняем скриншотом)
+let CHAR_SCALE = 1.15;        // масштаб модели Quaternius Soldier под рост ~1.8 м (хитбоксы)
 let CHAR_YOFF = 0;            // сдвиг ног к y=0
 let net = null;               // { remote: RemotePlayer, solo?: bool }
 const NET_SEND_EVERY = 3;     // 60 Гц / 3 = 20 снапшотов/с
@@ -240,10 +244,16 @@ function ensureRemote() {
   // цвет = команда СОПЕРНИКА: хост это CT (синий), гость — T (песочный)
   const teamColor = lobby.isHost ? 0xc9a24a : 0x5b8fd6;
   net = { remote: new RemotePlayer(scene, makeAvatar(teamColor)) };
+  frags = 0; deaths = 0;
+  resetCombat();
 }
 
 function teardownNet() {
   if (net) { net.remote.dispose(); net = null; }
+  clearCorpses();
+  hurtEl.classList.remove('show');
+  killfeedEl.replaceChildren();
+  updateHpHud();
 }
 
 function sendNetSnapshot() {
@@ -257,6 +267,126 @@ function sendNetSnapshot() {
     +p.x.toFixed(3), +p.y.toFixed(3), +p.z.toFixed(3),
     +input.yaw.toFixed(4), +input.pitch.toFixed(4), flags,
   ]);
+}
+
+// --- HP, урон, режим 1-на-1: мгновенный респавн вне видимости (шаг 9) ---
+const HP_MAX = 100;
+let hp = HP_MAX;
+let frags = 0, deaths = 0;
+let invulnUntil = 0;         // после респавна кратко игнорируем добивание очередью
+let hurtTimer = null;
+
+function updateHpHud() {
+  hpEl.classList.toggle('low', hp <= 25);
+  hpEl.innerHTML = `<span>♥</span> <b>${Math.max(0, Math.round(hp))}</b>`;
+}
+
+function showHurt() {
+  hurtEl.classList.add('show');
+  clearTimeout(hurtTimer);
+  hurtTimer = setTimeout(() => hurtEl.classList.remove('show'), 150);
+}
+
+function addKill(text) {
+  const line = document.createElement('div');
+  line.textContent = text;
+  killfeedEl.appendChild(line);
+  setTimeout(() => line.remove(), 4500);
+  while (killfeedEl.children.length > 4) killfeedEl.firstChild.remove();
+}
+
+function resetCombat() {
+  hp = HP_MAX; invulnUntil = 0;
+  hurtEl.classList.remove('show');
+  killfeedEl.replaceChildren();
+  updateHpHud();
+}
+
+// команда соперника/жертвы (у обоих одна модель, различаем кольцом)
+function foeColor() { return lobby.isHost ? 0xc9a24a : 0x5b8fd6; }
+
+// Пул точек дефматч-респавна: сетка по карте, где помещается стоячая капсула.
+let dmSpawns = [];
+function buildDmSpawnPool() {
+  dmSpawns = [];
+  const min = mapBounds.min, max = mapBounds.max;
+  for (let x = min.x + 4; x <= max.x - 4; x += 6) {
+    for (let z = min.z + 4; z <= max.z - 4; z += 6) {
+      const y = findFloor(player.collider, x, z, max.y + 5);
+      if (y === null) continue;
+      if (player.fitsAt(x, y + 0.1, z)) dmSpawns.push([x, y + 0.1, z]);
+    }
+  }
+}
+
+// Выбор точки респавна: недалеко (14–45 м), но ВНЕ прямой видимости убийцы.
+const losRay = new THREE.Ray();
+const eyeA = new THREE.Vector3(), eyeB = new THREE.Vector3(), losDir = new THREE.Vector3();
+function pickRespawn(killer) {
+  if (!dmSpawns.length) { respawn(); return; }
+  const EYE = 1.6;
+  let best = null, bestScore = -Infinity;
+  for (const s of dmSpawns) {
+    const d = killer ? Math.hypot(s[0] - killer.x, s[2] - killer.z) : 30;
+    let visible = true;
+    if (killer) {
+      eyeA.set(killer.x, killer.y + EYE, killer.z);
+      eyeB.set(s[0], s[1] + EYE, s[2]);
+      losDir.copy(eyeB).sub(eyeA);
+      const len = losDir.length(); losDir.normalize();
+      losRay.origin.copy(eyeA); losRay.direction.copy(losDir);
+      const hit = mapCollider.geometry.boundsTree.raycastFirst(losRay, THREE.DoubleSide);
+      visible = !(hit && hit.distance < len - 0.5); // стена ближе цели → невидим
+    }
+    // хотим: невидим + дистанция в вилке; со случайной добавкой для разнообразия
+    let score = Math.random() * 3;
+    if (!visible) score += 100;
+    if (d >= 14 && d <= 45) score += 40;
+    else if (d < 14) score -= 60;             // слишком близко — плохо
+    if (best === null || score > bestScore) { best = s; bestScore = score; }
+  }
+  player.teleport(best[0], best[1], best[2]);
+  input.pitch = 0;
+  if (killer) input.yaw = Math.atan2(best[0] - killer.x, best[2] - killer.z); // лицом к бывшему убийце
+}
+
+// «Труп» у убийцы: временный клон модели с анимацией смерти на месте гибели.
+const corpses = [];
+function spawnCorpse(info) {
+  if (!info || !charGltf) return;
+  const avatar = buildModelAvatar(charGltf, { scale: CHAR_SCALE, yOffset: CHAR_YOFF, yawOffset: CHAR_YAW, ring: foeColor() });
+  avatar.group.position.set(info.x, info.y, info.z);
+  avatar.group.rotation.y = (info.yaw ?? 0) + CHAR_YAW;
+  scene.add(avatar.group);
+  corpses.push({ avatar, t: 0 });
+}
+function updateCorpses(dt) {
+  for (let i = corpses.length - 1; i >= 0; i--) {
+    const c = corpses[i];
+    c.t += dt;
+    c.avatar.update(dt, { dead: true, moving: false, crouching: false });
+    if (c.t > 3) { c.avatar.group.position.y -= dt * 0.6; }   // после 3 с уходит в пол
+    if (c.t > 4) { scene.remove(c.avatar.group); c.avatar.dispose(); corpses.splice(i, 1); }
+  }
+}
+function clearCorpses() {
+  for (const c of corpses) { scene.remove(c.avatar.group); c.avatar.dispose(); }
+  corpses.length = 0;
+}
+
+function localDie() {
+  deaths++;
+  // место смерти → убийце для «трупа»; шлём ДО телепорта
+  const p = player.position;
+  lobby.sendDead({ x: +p.x.toFixed(2), y: +p.y.toFixed(2), z: +p.z.toFixed(2), yaw: +input.yaw.toFixed(3) });
+  audio.playOneOf(['death1', 'death2'], { volume: 0.55 });
+  showHurt();
+  // мгновенный респавн вне видимости бывшего убийцы (соперник = net.remote)
+  const kp = net?.remote ? net.remote.avatar.group.position : null;
+  hp = HP_MAX;
+  pickRespawn(kp ? { x: kp.x, y: kp.y, z: kp.z } : null);
+  invulnUntil = performance.now() + 800; // не даём добить пулями «вдогонку»
+  updateHpHud();
 }
 
 document.getElementById('btnHost').addEventListener('click', () => {
@@ -323,6 +453,18 @@ lobby.onPeer = connected => {
 };
 lobby.onStart = () => startNetGame();
 lobby.onSnap = data => { net?.remote.push(data, performance.now()); };
+lobby.onHit = msg => {                      // соперник попал в нас
+  if (!net || !msg || typeof msg.dmg !== 'number') return;
+  if (performance.now() < invulnUntil) return; // кратко неуязвимы сразу после респавна
+  hp -= msg.dmg;
+  showHurt();
+  if (hp <= 0) localDie(); else updateHpHud();
+};
+lobby.onDead = info => {                     // соперник подтвердил, что мы его убили
+  frags++;
+  addKill('соперник повержен ✓');
+  spawnCorpse(info);                         // «труп» на месте гибели
+};
 
 // возврат мыши кликом по канвасу (в т.ч. у гостя после автостарта матча)
 canvas.addEventListener('click', () => {
@@ -364,8 +506,6 @@ shotRay.far = 400;
 shotRay.firstHitOnly = true;
 const shotDir = new THREE.Vector3();
 const shotOrigin = new THREE.Vector3();
-const tracerFrom = new THREE.Vector3();
-const tracerTo = new THREE.Vector3();
 const numberPos = new THREE.Vector3();
 let mapCollider = null;
 let hitmarkTimer = null;
@@ -423,21 +563,31 @@ function aimShot(spreadRad) {
 
 function hitscanTargets() {
   const wallHit = shotRay.intersectObject(mapCollider, false)[0] ?? null;
-  const dummyMeshes = dummies.filter(d => !d.dead).flatMap(d => d.meshes);
-  const bodyHit = shotRay.intersectObjects(dummyMeshes, false)[0] ?? null;
+  const bodyMeshes = dummies.filter(d => !d.dead).flatMap(d => d.meshes);
+  // хитбоксы сетевого соперника (по его интерполированной позиции — «бьёшь что видишь»)
+  if (net && net.remote.canBeHit) bodyMeshes.push(...net.remote.hitboxes);
+  const bodyHit = shotRay.intersectObjects(bodyMeshes, false)[0] ?? null;
   if (bodyHit && (!wallHit || bodyHit.distance < wallHit.distance)) return { bodyHit, wallHit: null };
   return { bodyHit: null, wallHit };
 }
 
 function applyBodyHit(def, bodyHit) {
   const part = bodyHit.object.userData.part;
-  const dummy = bodyHit.object.userData.dummy;
   const dmg = computeDamage(def, bodyHit.distance, part);
-  const died = dummy.hit(dmg);
   numberPos.copy(bodyHit.point);
   numberPos.y += 0.25;
   effects.addDamageNumber(numberPos, dmg, part === 'head');
   flashHitmark(part === 'head');
+
+  if (bodyHit.object.userData.remote) {
+    // сетевой игрок: урон применит он у себя, смерть определит и пришлёт 'dead'
+    lobby.sendHit({ dmg, part });
+    if (part === 'head' && !def.melee) audio.playOneOf(['headshot1', 'headshot2'], { volume: 0.6 });
+    return false;
+  }
+
+  const dummy = bodyHit.object.userData.dummy;
+  const died = dummy.hit(dmg);
   if (died) audio.playOneOf(['death1', 'death2'], { volume: 0.7 });
   else if (part === 'head' && !def.melee) audio.playOneOf(['headshot1', 'headshot2'], { volume: 0.6 });
   return died;
@@ -469,22 +619,13 @@ function fireShot(ev) {
   aimShot(spread);
 
   const { bodyHit, wallHit } = hitscanTargets();
-  let endPoint = null;
   if (bodyHit) {
     applyBodyHit(def, bodyHit);
-    endPoint = bodyHit.point;
   } else if (wallHit) {
     effects.addDecal(wallHit.point, wallHit.face.normal);
-    endPoint = wallHit.point;
   }
-
-  // Трассер вылетает из дула, а не из центра экрана: смещение дула задано
-  // в пространстве камеры оружия (FOV 54) — x/y растягиваем под FOV основной
-  // камеры, чтобы точка на экране совпала с видимым стволом, и переводим в мир
-  const muzzle = viewmodel.active?.opts.muzzle ?? [0.14, -0.11, -0.5];
-  const fovK = Math.tan(camera.fov * 0.5 * D2R) / Math.tan(viewmodel.camera.fov * 0.5 * D2R);
-  tracerFrom.set(muzzle[0] * fovK, muzzle[1] * fovK, muzzle[2]).applyMatrix4(camera.matrixWorld);
-  effects.addTracer(tracerFrom, endPoint ?? tracerTo.copy(shotOrigin).addScaledVector(shotDir, 120));
+  // Трассер убран по фидбеку игрока (2026-07-04) — остаётся вспышка у ствола,
+  // декали, числа урона, звук.
 
   // Отдача CS-стиля: полный «пинок» уходит в punch и НАКАПЛИВАЕТСЯ, пока
   // очередь зажата (затухание во время стрельбы почти нулевое — см. tick).
@@ -574,6 +715,7 @@ async function init() {
   player = new PlayerController(map.collider);
   player.killY = mapBounds.min.y - 5;
   respawn();
+  buildDmSpawnPool(); // точки для мгновенного респавна в режиме 1-на-1
 
   // Оружие: все модели ПАРАЛЛЕЛЬНО (время = самый тяжёлый файл, не сумма),
   // с общим прогрессом и таймаутом на каждую — игра стартует в любом случае.
@@ -615,6 +757,7 @@ async function init() {
     const gltfLoader = new GLTFLoader();
     charGltf = await withTimeout(new Promise((res, rej) =>
       gltfLoader.load(av('./assets/player.glb'), res, undefined, rej)), 20_000);
+    if (charGltf) pinRootMotion(charGltf.animations); // убрать съезжание модели при беге/смерти
   } catch { charGltf = null; }
 
   effects = new Effects(scene);
@@ -628,6 +771,7 @@ async function init() {
     if (y !== null) dummies.push(new Dummy(scene, x, y, z, yawDeg));
   }
   updateAmmoHud();
+  updateHpHud();
 
   clearInterval(loadTicker);
   // в дебаге (headless-тесты) меню пропускаем — сразу в игру; ?menu вернёт меню
@@ -772,11 +916,13 @@ function render(delta, fps, alpha) {
       `поз ${p.x.toFixed(1)} ${p.y.toFixed(1)} ${p.z.toFixed(1)}\n` +
       `скор ${hspeed.toFixed(1)} м/с${player.onGround ? ' · земля' : ''}${player.crouching ? ' · присед' : ''}` +
       (lobby.connected ? `\nпинг ${lobby.rtt ?? '…'} мс` : '') +
+      (net ? `\nфраги ${frags} · смерти ${deaths}` : '') +
       (editor.active ? '\n[РЕДАКТОР]' : '');
   }
 
   // соперник интерполируется по времени приёма снапшотов (реальные мс, не тики)
   if (net) net.remote.update(delta, performance.now());
+  if (corpses.length) updateCorpses(delta);
 
   renderer.clear();
   renderer.render(scene, camera);
@@ -850,6 +996,36 @@ const gameApi = {
   },
   pushRemote: arr => { net?.remote.push(arr, performance.now()); },
   killRemote: () => teardownNet(),
+  hbShow: on => { if (net) net.remote._hbMat.visible = on; },
+  combat: () => ({ hp, frags, deaths, invuln: performance.now() < invulnUntil, corpses: corpses.length, pool: dmSpawns.length }),
+  remoteTop: () => {
+    if (!net) return null;
+    const g = net.remote.avatar.group;
+    g.updateWorldMatrix(true, true);
+    let maxY = -Infinity, minY = Infinity;
+    g.traverse(o => {
+      if (o.isBone) { const y = o.matrixWorld.elements[13]; if (y > maxY) maxY = y; if (y < minY) minY = y; }
+    });
+    return { headBone: +(maxY - g.position.y).toFixed(3), footBone: +(minY - g.position.y).toFixed(3) };
+  },
+  testShot: () => {
+    aimShot(0);
+    const { bodyHit, wallHit } = hitscanTargets();
+    return {
+      body: bodyHit ? { part: bodyHit.object.userData.part, remote: !!bodyHit.object.userData.remote, dist: +bodyHit.distance.toFixed(2) } : null,
+      wall: wallHit ? +wallHit.distance.toFixed(2) : null,
+      canBeHit: net ? net.remote.canBeHit : null,
+      hbCount: net ? net.remote.hitboxes.length : 0,
+    };
+  },
+  canSee: (ax, ay, az, bx, by, bz) => {
+    if (!mapCollider) return null;
+    const o = new THREE.Vector3(ax, ay, az), t = new THREE.Vector3(bx, by, bz);
+    const dir = t.clone().sub(o); const len = dir.length(); dir.normalize();
+    const hit = mapCollider.geometry.boundsTree.raycastFirst(new THREE.Ray(o, dir), THREE.DoubleSide);
+    return !(hit && hit.distance < len - 0.5);
+  },
+  hurtSelf: (dmg, part) => lobby.onHit?.({ dmg, part }),
   setCharYaw: deg => { CHAR_YAW = deg * Math.PI / 180; if (net) net.remote.yawOffset = CHAR_YAW; },
   setCharFit: (scale, yOff) => {
     if (scale != null) CHAR_SCALE = scale;

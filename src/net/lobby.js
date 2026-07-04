@@ -35,9 +35,13 @@ export class Lobby {
     this.onPeer = null;   // (connected: boolean) => void
     this.onStart = null;  // () => void — хост скомандовал старт
     this.onSnap = null;   // (data, peerId) => void — снапшот состояния соперника
+    this.onHit = null;    // ({dmg, part}) => void — соперник попал в НАС
+    this.onDead = null;   // () => void — соперник сообщил, что мы его убили
     this._pingTimer = null;
     this._startAction = null;
     this._snapAction = null;
+    this._hitAction = null;
+    this._deadAction = null;
   }
 
   get connected() { return !!this.peerId; }
@@ -57,6 +61,14 @@ export class Lobby {
     this._snapAction = this.room.makeAction('snap');
     this._snapAction.onMessage = (data, peerId) => this.onSnap?.(data, peerId);
 
+    // Стрельба по сети (шаг 9): попадание считает стрелок и шлёт урон жертве
+    // (клиент-авторитетно — для приватной игры на двоих достаточно и просто).
+    this._hitAction = this.room.makeAction('hit');
+    this._hitAction.onMessage = data => this.onHit?.(data);
+    // жертва, умерев, сообщает убийце (с местом гибели — для «трупа»)
+    this._deadAction = this.room.makeAction('dead');
+    this._deadAction.onMessage = data => this.onDead?.(data);
+
     this.room.onPeerJoin = id => {
       this.peerId = id;
       this._startPing();
@@ -74,6 +86,8 @@ export class Lobby {
 
   // Снапшот шлём соседу как есть (компактный массив чисел). В 1v1 — всем пирам.
   sendSnap(data) { this._snapAction?.send(data); }
+  sendHit(data) { this._hitAction?.send(data); }
+  sendDead(data) { this._deadAction?.send(data ?? {}); }
 
   _startPing() {
     this._stopPing();
@@ -97,6 +111,8 @@ export class Lobby {
     this.code = null;
     this._startAction = null;
     this._snapAction = null;
+    this._hitAction = null;
+    this._deadAction = null;
   }
 }
 
