@@ -26,7 +26,7 @@ const DEBUG = params.has('debug');
 // Версия игры: БАМПИТЬ ПРИ КАЖДОМ ДЕПЛОЕ мелкими шагами (v0.71, v0.72, …);
 // v1.0 — готовая игра. Выводится сверху экрана из JS — по номеру видно,
 // доехало ли обновление или браузер держит старый кэш
-const GAME_VERSION = 'v0.83';
+const GAME_VERSION = 'v0.84';
 
 // Версия ассетов: GitHub Pages кэширует на 10 минут (max-age=600) — без
 // query-параметра после редеплоя браузер подмешивает старые файлы к новым
@@ -1057,6 +1057,38 @@ const gameApi = {
       min: b.min.toArray().map(v => +v.toFixed(2)), max: b.max.toArray().map(v => +v.toFixed(2)),
       size: b.getSize(new THREE.Vector3()).toArray().map(v => +v.toFixed(2)),
       children: g.children.length,
+    };
+  },
+  // истинные габариты ВИДИМОГО меша (скиннинг вершин), относительно ног (group.position)
+  modelBounds: () => {
+    if (!net) return null;
+    const g = net.remote.avatar.group;
+    g.updateWorldMatrix(true, true);
+    const v = new THREE.Vector3();
+    let minY = Infinity, maxY = -Infinity, minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity, n = 0;
+    g.traverse(o => {
+      if (o.isSkinnedMesh) {
+        o.skeleton.update();
+        const pos = o.geometry.attributes.position;
+        const step = Math.max(1, Math.floor(pos.count / 3000));
+        for (let i = 0; i < pos.count; i += step) {
+          v.fromBufferAttribute(pos, i);
+          o.applyBoneTransform(i, v);
+          o.localToWorld(v);
+          g.worldToLocal(v); // в локальную систему группы — там же, где хитбоксы (0,y,0)
+          if (v.y < minY) minY = v.y; if (v.y > maxY) maxY = v.y;
+          if (v.x < minX) minX = v.x; if (v.x > maxX) maxX = v.x;
+          if (v.z < minZ) minZ = v.z; if (v.z > maxZ) maxZ = v.z;
+          n++;
+        }
+      }
+    });
+    if (!n) return { noSkinned: true };
+    return {
+      minY: +minY.toFixed(3), maxY: +maxY.toFixed(3),
+      centerX: +((minX + maxX) / 2).toFixed(3), centerZ: +((minZ + maxZ) / 2).toFixed(3),
+      width: +(maxX - minX).toFixed(3), depth: +(maxZ - minZ).toFixed(3),
+      height: +(maxY - minY).toFixed(3), sampled: n,
     };
   },
 };

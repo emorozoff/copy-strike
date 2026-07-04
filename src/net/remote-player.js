@@ -38,10 +38,14 @@ export class RemotePlayer {
       avatar.group.add(m);
       return m;
     };
+    // Габариты откалиброваны по РЕАЛЬНОЙ модели (скиннинг вершин, headless-замер):
+    // видимый рост ~2.0 м, ориентиры — таз 1.09, грудь 1.34, плечи 1.60, шея 1.66,
+    // макушка(шлем) 2.0. Раньше стек был рассчитан на 1.8 м и «не доставал» до груди
+    // и головы. Ноги 0–1.15, торс 1.04–1.70, голова 1.66–2.06 (сплошное покрытие).
     this.hitboxes = [
-      hb(new THREE.BoxGeometry(0.42, 0.9, 0.32), 0.45, 'legs'),
-      hb(new THREE.BoxGeometry(0.52, 0.66, 0.34), 1.22, 'torso'),
-      hb(new THREE.SphereGeometry(0.17, 10, 8), 1.70, 'head'),
+      hb(new THREE.BoxGeometry(0.48, 1.15, 0.34), 0.575, 'legs'),
+      hb(new THREE.BoxGeometry(0.56, 0.66, 0.38), 1.37, 'torso'),
+      hb(new THREE.SphereGeometry(0.20, 12, 10), 1.86, 'head'),
     ];
 
     avatar.group.visible = false;

@@ -26,10 +26,12 @@ export class ModelDummy {
       this.group.add(m);
       return m;
     };
+    // те же откалиброванные габариты, что у сетевого соперника (см. remote-player.js):
+    // модель ~2.0 м. Ноги 0–1.15, торс 1.04–1.70, голова 1.66–2.06.
     this.meshes = [
-      hb(new THREE.BoxGeometry(0.42, 0.9, 0.32), 0.45, 'legs'),
-      hb(new THREE.BoxGeometry(0.52, 0.66, 0.34), 1.22, 'torso'),
-      hb(new THREE.SphereGeometry(0.17, 10, 8), 1.70, 'head'),
+      hb(new THREE.BoxGeometry(0.48, 1.15, 0.34), 0.575, 'legs'),
+      hb(new THREE.BoxGeometry(0.56, 0.66, 0.38), 1.37, 'torso'),
+      hb(new THREE.SphereGeometry(0.20, 12, 10), 1.86, 'head'),
     ];
 
     this.maxHp = 100;
