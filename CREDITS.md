@@ -5,11 +5,18 @@
 
 ## Модели
 
-- **Боец (соперник по сети)** — `assets/player.glb`
-  «Character Soldier» by **Quaternius** (quaternius.com), **CC0 / Public Domain**.
-  Источник: https://poly.pizza/m/PpLF4rt4ah . Милитари-боец с каской и винтовкой;
-  клипы Idle/Run/Run_Gun/Death/Duck. Атрибуция не обязательна; указываем из уважения.
-  (Ранее использовалась их же «Character Animated» — заменена на более «боевой» вид.)
+- **Боец (соперник по сети + тренировочные мишени)** — `assets/player.glb`
+  «SAS | CS2 Agent Model Blue» by **gettan (kill6lucius)**, Sketchfab, **CC-BY 4.0**
+  (указание автора обязательно). Источник:
+  https://sketchfab.com/3d-models/sas-cs2-agent-model-blue-7f18aaccd0ee4694a36646101a12339e .
+  Реалистичный агент SAS из Counter-Strike 2 (Valve) — противогаз, тактическая
+  экипировка. Рип из CS2; для приватной игры допустимо. **Пока БЕЗ анимаций**
+  (родные 394 «клипа» — технические позы CS2, непригодны): модель статична,
+  анимации idle/бег/смерть — следующий заход (Mixamo или ретаргет).
+  Обработка: пере-экспорт через three GLTFExporter (срезал 127k мусорных
+  accessor-ов) → meshopt+webp: 42 МБ → 1.4 МБ.
+  (Ранее: Quaternius «Character Soldier», CC0 — заменён по просьбе игрока на
+  реалистичный вид.)
 
 - **Glock-18 + руки (viewmodel)** — `assets/glock.glb`
   «Fps Rig» by **J-Toastie** через Poly Pizza, **CC-BY** — авторство обязательно.

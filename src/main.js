@@ -26,11 +26,11 @@ const DEBUG = params.has('debug');
 // Версия игры: БАМПИТЬ ПРИ КАЖДОМ ДЕПЛОЕ мелкими шагами (v0.71, v0.72, …);
 // v1.0 — готовая игра. Выводится сверху экрана из JS — по номеру видно,
 // доехало ли обновление или браузер держит старый кэш
-const GAME_VERSION = 'v0.80';
+const GAME_VERSION = 'v0.81';
 
 // Версия ассетов: GitHub Pages кэширует на 10 минут (max-age=600) — без
 // query-параметра после редеплоя браузер подмешивает старые файлы к новым
-const ASSET_V = '7';
+const ASSET_V = '8';
 const av = url => url + '?v=' + ASSET_V;
 
 const canvas = document.getElementById('c');
@@ -230,7 +230,7 @@ function startNetGame() {
 // --- соперник на карте (шаг 8): снапшоты 20 Гц + интерполяция «на 100 мс назад» ---
 let charGltf = null;          // общая GLB-модель бойца (клонируется под каждого)
 let CHAR_YAW = Math.PI;       // разворот модели лицом к −Z (калибровка скриншотом)
-let CHAR_SCALE = 1.15;        // масштаб модели Quaternius Soldier под рост ~1.8 м (хитбоксы)
+let CHAR_SCALE = 1.0;         // SAS-агент CS2 уже ~1.8 м в родном масштабе (совпадает с хитбоксами)
 let CHAR_YOFF = 0;            // сдвиг ног к y=0
 let net = null;               // { remote: RemotePlayer, solo?: bool }
 const NET_SEND_EVERY = 3;     // 60 Гц / 3 = 20 снапшотов/с
